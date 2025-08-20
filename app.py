@@ -7,7 +7,7 @@ import os
 import re
 
 def resolve_font(font_name, fonts_dir=None):
-fonts_dir = Path(fonts_dir or os.getenv('FONTS_DIR', 'Fonts'))
+fonts_dir = Path(fonts_dir or os.getenv('FONTS_DIR', 'font_archivo'))
 if not fonts_dir.exists():
 raise FileNotFoundError(str(fonts_dir.resolve()))
 wanted = re.sub(r'[-_ .]', '', (font_name or '').strip()).casefold()
