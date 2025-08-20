@@ -33,7 +33,7 @@ def get_font(fs, font_name="Archivo-Regular"):
     try:
         return ImageFont.truetype(caminho, fs)
     except Exception as e:
-        print("Erro ao abrir fonte:", caminho, "->", e)
+        print("Erro abrindo fonte:", caminho, "->", e)
         return ImageFont.load_default()
 
 @app.route('/process-text', methods=['POST'])
