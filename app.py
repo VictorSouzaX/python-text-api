@@ -30,7 +30,7 @@ def color_rgba(s, op=100):
     a = int(rgba[3] * op/100)
     return (rgba[0], rgba[1], rgba[2], a)
 
-def get_font(fs, font_name="Archivo-Regular"):
+def get_font(fs, font_name):
     caminho = f"Fonts/{font_name}.ttf"
     print("Tentando abrir fonte:", caminho, "tam:", fs)
     try:
