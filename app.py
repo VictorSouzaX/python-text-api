@@ -29,10 +29,11 @@ def color_rgba(s, op=100):
 
 def get_font(fs, font_name="Archivo-Regular"):
     caminho = f"Fonts/{font_name}.ttf"
+    print("Tentando abrir fonte:", caminho, "tam:", fs)
     try:
         return ImageFont.truetype(caminho, fs)
     except Exception as e:
-        print("Erro abrindo fonte:", caminho, "->", e)
+        print("Erro ao abrir fonte:", caminho, "->", e)
         return ImageFont.load_default()
 
 @app.route('/process-text', methods=['POST'])
