@@ -1,7 +1,10 @@
 from pathlib import Path
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
-import base64, io, os, re
+import base64
+import io
+import os
+import re
 
 def resolve_font(font_name, fonts_dir=None):
 fonts_dir = Path(fonts_dir or os.getenv('FONTS_DIR', 'Fonts'))
@@ -20,9 +23,9 @@ raise FileNotFoundError(font_name)
 def parse_color(hex_color, opacity_pct=100):
 c = (hex_color or '#000').lstrip('#')
 if len(c) == 3:
-r = int(c[0]*2, 16)
-g = int(c[1]*2, 16)
-b = int(c[2]*2, 16)
+r = int(c[0] * 2, 16)
+g = int(c[1] * 2, 16)
+b = int(c[2] * 2, 16)
 else:
 r = int(c[0:2], 16)
 g = int(c[2:4], 16)
