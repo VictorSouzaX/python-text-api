@@ -1,16 +1,50 @@
-from pathlib import Path
 from flask import Flask, request, jsonify
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 import base64
-import io
+from io import BytesIO
+from pathlib import Path
 import os
 import re
 
-def resolve_font(font_name, fonts_dir=None):
-fonts_dir = Path(fonts_dir or os.getenv("FONTS_DIR", "font_archivo"))
+app = Flask(name)
+
+def parse_int(v, d):
+try:
+return int(str(v).replace('px', ''))
+except Exception:
+return d
+
+def decode_img(b64):
+b = base64.b64decode(str(b64).split(",")[-1])
+return Image.open(BytesIO(b)).convert("RGBA")
+
+def encode_img(img, fmt="PNG"):
+buf = BytesIO()
+img.save(buf, format=fmt)
+return base64.b64encode(buf.getvalue()).decode()
+
+def color_rgba(s, op=100):
+try:
+rgba = ImageColor.getcolor(s, "RGBA")
+except Exception:
+rgba = (0, 0, 0, 255)
+a = int(rgba[3] * max(0, min(100, int(op))) / 100)
+return (rgba[0], rgba[1], rgba[2], a)
+
+def find_font_file(font_name, fonts_dir):
+fonts_dir = Path(fonts_dir)
 if not fonts_dir.exists():
 raise FileNotFoundError(str(fonts_dir.resolve()))
-wanted = re.sub(r"[-_ .]", "", (font_name or "").strip()).casefold()
+name = (font_name or "").strip()
+if name.lower().endswith(".ttf") or name.lower().endswith(".otf") or name.lower().endswith(".ttc"):
+direct = fonts_dir / name
+if direct.exists():
+return str(direct)
+else:
+direct = fonts_dir / f"{name}.ttf"
+if direct.exists():
+return str(direct)
+wanted = re.sub(r"[-_ .]", "", Path(name).stem).casefold()
 candidates = []
 for ext in (".ttf", ".otf", "*.ttc"):
 candidates += list(fonts_dir.rglob(ext))
@@ -18,99 +52,43 @@ for p in candidates:
 key = re.sub(r"[-_ .]", "", p.stem).casefold()
 if key == wanted:
 return str(p)
-raise FileNotFoundError(font_name)
+raise FileNotFoundError(name)
 
-def parse_color(hex_color, opacity_pct=100):
-c = (hex_color or "#000000").lstrip("#")
-if len(c) == 3:
-r = int(c[0] + c[0], 16)
-g = int(c[1] + c[1], 16)
-b = int(c[2] + c[2], 16)
-else:
-r = int(c[0:2], 16)
-g = int(c[2:4], 16)
-b = int(c[4:6], 16)
-a = round(max(0, min(100, int(opacity_pct))) * 255 / 100)
-return (r, g, b, a)
+def get_font(fs, font_name="Archivo-Regular", fonts_dir=None):
+fonts_dir = fonts_dir or os.getenv("FONTS_DIR", "font_archivo")
+try:
+path = find_font_file(font_name, fonts_dir)
+return ImageFont.truetype(path, int(fs))
+except Exception:
+return ImageFont.load_default()
 
-def wrap_text(text, font, max_width, draw):
-lines = []
-for paragraph in (text or "").splitlines():
-if not paragraph:
-lines.append("")
-continue
-words = paragraph.split(" ")
-line = ""
-for w in words:
-test = (line + " " + w).strip()
-if draw.textlength(test, font=font) <= max_width or not line:
-line = test
-else:
-lines.append(line)
-line = w
-if line:
-lines.append(line)
-return lines
+@app.route('/process-text', methods=['POST'])
+def process_text():
+j = request.get_json(silent=True) or {}
+b64 = j.get("image_b64") or j.get("image") or ""
+if not b64:
+return jsonify(error="image_b64 ausente"), 400
+try:
+img = decode_img(b64)
+except Exception as e:
+return jsonify(error=f"b64 decode fail: {e}"), 400
 
-def render_text_on_image(image_b64, texto, x=0, y=0, font="Archivo-BlackItalic", font_size=48, color="#000000", align="left", max_chars=None, line_height=None, max_width=None, opacity=100, fonts_dir=None):
-raw = base64.b64decode(image_b64.split(",")[-1])
-im = Image.open(io.BytesIO(raw)).convert("RGBA")
-font_path = resolve_font(font, fonts_dir)
-fnt = ImageFont.truetype(font_path, int(font_size))
-if max_width is None:
-max_width = im.width - int(x)
-overlay = Image.new("RGBA", im.size, (0, 0, 0, 0))
-draw = ImageDraw.Draw(overlay)
-if max_chars:
-texto = (texto or "")[:int(max_chars)]
-if line_height is None:
-line_height = int(fnt.size * 1.2)
-lines = wrap_text(texto or "", fnt, int(max_width), draw)
-fill = parse_color(color, opacity)
-cur_y = int(y)
-for line in lines:
-line_width = draw.textlength(line, font=fnt)
-if str(align).lower() == "center":
-cur_x = int(x) + int((int(max_width) - line_width) / 2)
-elif str(align).lower() == "right":
-cur_x = int(x) + int(int(max_width) - line_width)
-else:
-cur_x = int(x)
-draw.text((cur_x, cur_y), line, font=fnt, fill=fill)
-cur_y += int(line_height)
-out = Image.alpha_composite(im, overlay).convert("RGB")
-buf = io.BytesIO()
-out.save(buf, format="JPEG", quality=95)
-return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+t = str(j.get("texto", ""))
+x = parse_int(j.get("x", 50), 50)
+y = parse_int(j.get("y", 50), 50)
+fs = parse_int(j.get("font_size", 40), 40)
+color = j.get("color", "#000000")
+align = j.get("align", "left")
+op = parse_int(j.get("opacity", 100), 100)
+font_name = j.get("font", "Archivo-Regular")
+fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
 
-app = Flask(name)
+draw = ImageDraw.Draw(img)
+font = get_font(fs, font_name=font_name, fonts_dir=fonts_dir)
+fill = color_rgba(color, op)
+draw.multiline_text((x, y), t, font=font, fill=fill, align=align)
 
-@app.route("/health", methods=["GET"])
-def health():
-return "ok", 200
-
-@app.route("/render", methods=["POST"])
-def render():
-data = request.get_json(force=True)
-mc = data.get("max_chars")
-lhv = data.get("line_height")
-mwv = data.get("max_width")
-result = render_text_on_image(
-image_b64=data.get("image"),
-texto=data.get("texto", ""),
-x=int(data.get("x", 0)),
-y=int(data.get("y", 0)),
-font=data.get("font", "Archivo-BlackItalic"),
-font_size=int(data.get("font_size", 48)),
-color=data.get("color", "#000000"),
-align=data.get("align", "left"),
-max_chars=int(mc) if mc is not None else None,
-line_height=int(lhv) if lhv is not None else None,
-max_width=int(mwv) if mwv is not None else None,
-opacity=int(data.get("opacity", 100)),
-fonts_dir=data.get("fonts_dir") or "font_archivo"
-)
-return jsonify({"image": result})
-
-if name == "main":
-app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)), debug=False)
+out_b64 = encode_img(img, "PNG")
+return jsonify(image_b64=out_b64)
+if name == 'main':
+app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
