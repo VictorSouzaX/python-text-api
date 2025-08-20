@@ -23,9 +23,9 @@ raise FileNotFoundError(font_name)
 def parse_color(hex_color, opacity_pct=100):
 c = (hex_color or '#000').lstrip('#')
 if len(c) == 3:
-r = int(c[0] * 2, 16)
-g = int(c[1] * 2, 16)
-b = int(c[2] * 2, 16)
+r = int(c[0] + c[0], 16)
+g = int(c[1] + c[1], 16)
+b = int(c[2] + c[2], 16)
 else:
 r = int(c[0:2], 16)
 g = int(c[2:4], 16)
