@@ -108,7 +108,7 @@ max_chars=int(mc) if mc is not None else None,
 line_height=int(lhv) if lhv is not None else None,
 max_width=int(mwv) if mwv is not None else None,
 opacity=int(data.get('opacity', 100)),
-fonts_dir=data.get('fonts_dir')
+fonts_dir=data.get('fonts_dir') or 'font_archivo'
 )
 return jsonify({'image': result})
 
