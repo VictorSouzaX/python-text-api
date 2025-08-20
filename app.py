@@ -24,9 +24,13 @@ def color_rgba(s, op=100):
     a = int(rgba[3] * op/100)
     return (rgba[0], rgba[1], rgba[2], a)
 
-def get_font(fs):
-    try: return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", fs)
-    except: return ImageFont.load_default()
+def get_font(fs, font_name="Archivo-Regular"):
+    caminho = f"Fonts/{font_name}.ttf"
+    try:
+        return ImageFont.truetype(caminho, fs)
+    except Exception as e:
+        print("Erro abrindo fonte:", caminho, "->", e)
+        return ImageFont.load_default()
 
 @app.route('/process-text', methods=['POST'])
 def process_text():
