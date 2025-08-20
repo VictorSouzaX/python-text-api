@@ -1,3 +1,5 @@
+print("Recebi font:", j.get("font"), "| fs:", j.get("font_size"), "| Arquivo:", f"Fonts/{j.get('font','Archivo-Regular')}.ttf")
+
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 import base64
