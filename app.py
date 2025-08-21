@@ -68,14 +68,24 @@ def text_width(draw, text, font):
 
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
     """Função simples para desenhar texto com quebra de linha e alinhamento vertical"""
+    print(f"draw_text_simple - Iniciando com:")
+    print(f"  Texto: '{text}'")
+    print(f"  X: {x}, Y: {y}")
+    print(f"  Align: {align}, Align Vertical: {align_vertical}")
+    print(f"  Max Width: {max_width}")
+    
     if not text:
+        print("draw_text_simple - Texto vazio, retornando Y original")
         return y
     
     # Primeiro, calcula todas as linhas e a altura total
     all_lines = []
     line_height = font.size + 4  # Altura da linha baseada no tamanho da fonte
+    print(f"draw_text_simple - Altura da linha: {line_height}")
     
     lines = text.split('\n')
+    print(f"draw_text_simple - Linhas originais: {len(lines)}")
+    
     for line in lines:
         if not line.strip():
             all_lines.append("")
@@ -106,22 +116,33 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
             # Sem quebra de linha por largura
             all_lines.append(line)
     
+    print(f"draw_text_simple - Linhas processadas: {len(all_lines)}")
+    print(f"draw_text_simple - Linhas: {all_lines}")
+    
     # Calcula a altura total do texto
     total_height = len(all_lines) * line_height
+    print(f"draw_text_simple - Altura total: {total_height}")
     
     # Ajusta a posição Y baseada no alinhamento vertical
+    original_y = y
     if align_vertical == "center":
         y = y - (total_height // 2)
+        print(f"draw_text_simple - Alinhamento center: Y ajustado de {original_y} para {y}")
     elif align_vertical == "bottom":
         y = y - total_height
+        print(f"draw_text_simple - Alinhamento bottom: Y ajustado de {original_y} para {y}")
+    else:
+        print(f"draw_text_simple - Alinhamento top: Y mantido em {y}")
     
     # Agora desenha todas as linhas
     current_y = y
-    for line in all_lines:
+    for i, line in enumerate(all_lines):
         if line.strip():
+            print(f"draw_text_simple - Desenhando linha {i+1}: '{line}' em Y={current_y}")
             draw_text_line(draw, line, x, current_y, font, fill, align, max_width)
         current_y += line_height
     
+    print(f"draw_text_simple - Finalizado. Y final: {current_y}")
     return current_y
 
 def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
@@ -147,13 +168,20 @@ def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
 
 @app.post("/process-text")
 def process_text():
+    print("=== INICIANDO PROCESSAMENTO ===")
     j = request.get_json(silent=True) or {}
+    print(f"JSON recebido: {j}")
+    
     img_b64 = j.get("image_b64") or j.get("image")
     if not img_b64:
+        print("ERRO: image_b64 ausente")
         return jsonify(error="image_b64 ausente"), 400
+    
     try:
         img = decode_b64_image(img_b64)
+        print(f"Imagem decodificada: {img.width}x{img.height}")
     except Exception as e:
+        print(f"ERRO ao decodificar imagem: {e}")
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
     text = str(j.get("texto") or j.get("text") or "")
@@ -172,19 +200,50 @@ def process_text():
     opacity = to_px(j.get("opacity"), 100)
     font_name = j.get("font", "Archivo-Regular")
 
+    print(f"Parâmetros processados:")
+    print(f"  Texto: '{text}'")
+    print(f"  X: {x}, Y: {y}")
+    print(f"  Font: {font_name}, Size: {fs}")
+    print(f"  Align: {align}, Align Vertical: {align_vertical}")
+    print(f"  Max Width: {max_width}")
+    print(f"  Color: {color}, Opacity: {opacity}")
+
     draw = ImageDraw.Draw(img)
     font = load_font(fs, font_name, "font_archivo")
     fill = color_to_rgba(color, opacity)
+    
+    print(f"Fonte carregada: {font}")
+    print(f"Cor: {fill}")
 
-    # Desenha o texto de forma simples
-    draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
+    try:
+        # Desenha o texto de forma simples
+        final_y = draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
+        print(f"Texto desenhado com sucesso. Y final: {final_y}")
+    except Exception as e:
+        print(f"ERRO ao desenhar texto: {e}")
+        return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
 
-    out_b64 = encode_b64_image(img, "PNG")
-    return jsonify(image_b64=out_b64, width=img.width, height=img.height)
+    try:
+        out_b64 = encode_b64_image(img, "PNG")
+        print("Imagem codificada com sucesso")
+        return jsonify(image_b64=out_b64, width=img.width, height=img.height)
+    except Exception as e:
+        print(f"ERRO ao codificar imagem: {e}")
+        return jsonify(error=f"Falha ao codificar imagem: {e}"), 500
 
 @app.get("/health")
 def health():
     return "ok", 200
+
+@app.get("/test")
+def test():
+    """Endpoint de teste simples"""
+    return jsonify({
+        "status": "ok",
+        "message": "API funcionando",
+        "align_vertical_supported": True,
+        "supported_align_vertical": ["top", "center", "bottom"]
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
