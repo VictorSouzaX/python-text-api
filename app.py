@@ -3,7 +3,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
 import base64, os, re
-app = Flask(**name**)
+
+app = Flask(name)
+
 def px(value, default):
 if value is None:
 return default
