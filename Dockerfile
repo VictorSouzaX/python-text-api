@@ -7,3 +7,4 @@ COPY . .
 ENV FONTS_DIR=/app/font_archivo PORT=8080
 EXPOSE 8080
 CMD ["python","app.py"]
+RUN echo force-rebuild
