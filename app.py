@@ -7,8 +7,7 @@ import base64, os, re
 app = Flask(name)
 
 def to_px(value, default):
-try:
-s = str(value).strip().lower().replace("px", "")
+try: s = str(value).strip().lower().replace("px", "")
 if s == "":
 return default
 return int(float(s))
