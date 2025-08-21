@@ -2,12 +2,13 @@ from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
-import base64, os, re
+import base64, os
 
 app = Flask(name)
 
 def to_px(value, default):
-try: s = str(value).strip().lower().replace("px", "")
+try:
+s = str(value).strip().lower().replace("px", "")
 if s == "":
 return default
 return int(float(s))
@@ -38,32 +39,27 @@ op = max(0, min(100, int(to_px(opacity, 100))))
 a = int(rgba[3] * (op / 100.0))
 return (rgba[0], rgba[1], rgba[2], a)
 
-def find_font_path(name, fonts_dir=None):
-if not name:
-return None
+def load_font(size, font_name, fonts_dir):
+size = int(size)
 root = Path(fonts_dir or os.getenv("FONTS_DIR", "font_archivo"))
-if not root.exists():
-return None
-p = root / name
+if font_name:
+p = root / font_name
 if p.exists():
-return str(p)
-for ext in (".ttf", ".otf", ".ttc"):
-q = root / (name if name.lower().endswith(ext) else f"{name}{ext}")
-if q.exists():
-return str(q)
-wanted = Path(name).stem.lower()
-for f in root.rglob("*"):
-if f.suffix.lower() in (".ttf", ".otf", ".ttc") and f.stem.lower() == wanted:
-return str(f)
-return None
-
-def load_font(size, name="Archivo-Regular", fonts_dir=None):
-path = find_font_path(name, fonts_dir)
 try:
-if path:
-return ImageFont.truetype(path, int(size))
+return ImageFont.truetype(str(p), size)
 except Exception:
 pass
+if not str(font_name).lower().endswith((".ttf", ".otf", ".ttc")):
+for ext in (".ttf", ".otf", ".ttc"):
+q = root / (str(font_name) + ext)
+if q.exists():
+try:
+return ImageFont.truetype(str(q), size)
+except Exception:
+pass
+try:
+return ImageFont.truetype("DejaVuSans.ttf", size)
+except Exception:
 return ImageFont.load_default()
 
 def text_width(draw, text, font):
@@ -102,10 +98,6 @@ line = w
 result.append(line)
 return result
 
-@app.get("/health")
-def health():
-return "ok", 200
-
 @app.post("/process-text")
 def process_text():
 j = request.get_json(silent=True) or {}
@@ -116,6 +108,7 @@ try:
 img = decode_b64_image(img_b64)
 except Exception as e:
 return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
+
 text = str(j.get("texto") or j.get("text") or "")
 x = to_px(j.get("x"), 0)
 y = to_px(j.get("y"), 0)
@@ -124,31 +117,37 @@ line_height = to_px(j.get("line_height"), int(fs * 1.2))
 max_width = to_px(j.get("max_width"), 0)
 max_chars = to_px(j.get("max_chars"), 0)
 if max_chars and len(text) > max_chars:
-text = text[:max_chars].rstrip()
+    text = text[:max_chars].rstrip()
 align = str(j.get("align", "left")).lower()
 if align not in ("left", "center", "right"):
-align = "left"
+    align = "left"
 color = j.get("color", "#000000")
 opacity = to_px(j.get("opacity"), 100)
 font_name = j.get("font", "Archivo-Regular")
 fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
+
 draw = ImageDraw.Draw(img)
 font = load_font(fs, font_name, fonts_dir)
 fill = color_to_rgba(color, opacity)
 lines = wrap_lines(text, font, draw, max_width)
+
 for line in lines:
-if align == "left" or not max_width:
-x_line = x
-else:
-w_line = text_width(draw, line, font)
-if align == "center":
-x_line = x + (max_width - w_line) // 2
-else:
-x_line = x + (max_width - w_line)
-draw.text((x_line, y), line, font=font, fill=fill)
-y += line_height
+    if align == "left" or not max_width:
+        x_line = x
+    else:
+        w_line = text_width(draw, line, font)
+        if align == "center":
+            x_line = x + (max_width - w_line) // 2
+        else:
+            x_line = x + (max_width - w_line)
+    draw.text((x_line, y), line, font=font, fill=fill)
+    y += line_height
+
 out_b64 = encode_b64_image(img, "PNG")
 return jsonify(image_b64=out_b64, width=img.width, height=img.height)
+@app.get("/health")
+def health():
+return "ok", 200
 
 if name == "main":
 app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
