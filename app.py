@@ -6,9 +6,7 @@ import base64, os, re
 
 app = Flask(name)
 
-def px(value, default):
-if value is None:
-return default
+def to_px(value, default):
 try:
 s = str(value).strip().lower().replace("px", "")
 if s == "":
@@ -37,18 +35,16 @@ try:
 rgba = ImageColor.getcolor(str(color), "RGBA")
 except Exception:
 rgba = (0, 0, 0, 255)
-op = max(0, min(100, int(px(opacity, 100))))
+op = max(0, min(100, int(to_px(opacity, 100))))
 a = int(rgba[3] * (op / 100.0))
 return (rgba[0], rgba[1], rgba[2], a)
 
-DEFAULT_FONTS_DIR = Path(os.getenv("FONTS_DIR", "font_archivo"))
-
 def find_font_path(name, fonts_dir=None):
 if not name:
-raise FileNotFoundError("font: vazio")
-root = Path(fonts_dir or DEFAULT_FONTS_DIR)
+return None
+root = Path(fonts_dir or os.getenv("FONTS_DIR", "font_archivo"))
 if not root.exists():
-raise FileNotFoundError(f"fonts_dir não encontrado: {root.resolve()}")
+return None
 p = root / name
 if p.exists():
 return str(p)
@@ -56,19 +52,19 @@ for ext in (".ttf", ".otf", ".ttc"):
 q = root / (name if name.lower().endswith(ext) else f"{name}{ext}")
 if q.exists():
 return str(q)
-wanted = re.sub(r"[-_ .]", "", Path(name).stem).casefold()
-for ext in (".ttf", ".otf", "*.ttc"):
-for f in root.rglob(ext):
-key = re.sub(r"[-_ .]", "", f.stem).casefold()
-if key == wanted:
+wanted = Path(name).stem.lower()
+for f in root.rglob("*"):
+if f.suffix.lower() in (".ttf", ".otf", ".ttc") and f.stem.lower() == wanted:
 return str(f)
-raise FileNotFoundError(f"Fonte não encontrada: {name}")
+return None
 
 def load_font(size, name="Archivo-Regular", fonts_dir=None):
-try:
 path = find_font_path(name, fonts_dir)
+try:
+if path:
 return ImageFont.truetype(path, int(size))
 except Exception:
+pass
 return ImageFont.load_default()
 
 def text_width(draw, text, font):
@@ -87,8 +83,7 @@ continue
 line = ""
 for w in words:
 test = w if line == "" else f"{line} {w}"
-w_px = text_width(draw, test, font)
-if w_px <= max_width:
+if text_width(draw, test, font) <= max_width:
 line = test
 else:
 if line == "":
@@ -123,21 +118,19 @@ img = decode_b64_image(img_b64)
 except Exception as e:
 return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 text = str(j.get("texto") or j.get("text") or "")
-x = px(j.get("x"), 0)
-y = px(j.get("y"), 0)
-fs = px(j.get("font_size"), 40)
-line_height = px(j.get("line_height"), 0)
-if line_height <= 0:
-line_height = int(fs * 1.2)
-max_width = px(j.get("max_width"), 0)
-max_chars = px(j.get("max_chars"), 0)
+x = to_px(j.get("x"), 0)
+y = to_px(j.get("y"), 0)
+fs = to_px(j.get("font_size"), 40)
+line_height = to_px(j.get("line_height"), int(fs * 1.2))
+max_width = to_px(j.get("max_width"), 0)
+max_chars = to_px(j.get("max_chars"), 0)
 if max_chars and len(text) > max_chars:
 text = text[:max_chars].rstrip()
 align = str(j.get("align", "left")).lower()
 if align not in ("left", "center", "right"):
 align = "left"
 color = j.get("color", "#000000")
-opacity = px(j.get("opacity"), 100)
+opacity = to_px(j.get("opacity"), 100)
 font_name = j.get("font", "Archivo-Regular")
 fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
 draw = ImageDraw.Draw(img)
