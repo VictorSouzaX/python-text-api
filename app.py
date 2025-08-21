@@ -66,122 +66,70 @@ def text_width(draw, text, font):
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0]
 
-# ---------- PARSER PARA <b>...</b> ----------
-def tokenize_rich(text):
-    segs = []
-    bold = False
-    buf = []
-    i = 0
-    n = len(text)
-    while i < n:
-        # Verifica se há caracteres suficientes para "<b>"
-        if i + 2 < n and text[i:i+3].lower() == "<b>":
-            if buf:
-                segs.append(("".join(buf), bold))
-                buf = []
-            bold = True
-            i += 3
-            continue
-        # Verifica se há caracteres suficientes para "</b>"
-        if i + 3 < n and text[i:i+4].lower() == "</b>":
-            if buf:
-                segs.append(("".join(buf), bold))
-                buf = []
-            bold = False
-            i += 4
-            continue
-        buf.append(text[i])
-        i += 1
-    if buf:
-        segs.append(("".join(buf), bold))
-    return segs
-
-def split_segments_by_newline(segments):
-    lines = [[]]
-    for txt, bold in segments:
-        if not txt:
-            continue
-        parts = txt.split("\n")
-        for idx, part in enumerate(parts):
-            if part:
-                lines[-1].append((part, bold))
-            if idx < len(parts) - 1:
-                lines.append([])
-    return lines
-
-def segments_width(draw, segs, font_regular, font_bold):
-    total = 0
-    for txt, is_bold in segs:
-        if not txt:
-            continue
-        font = font_bold if is_bold else font_regular
-        bbox = draw.textbbox((0, 0), txt, font=font)
-        total += bbox[2] - bbox[0]
-    return int(total)
-
-def layout_rich_lines(text, draw, font_regular, font_bold, max_width):
-    segs = tokenize_rich(text)
-    logical_lines = split_segments_by_newline(segs)
-    out = []
+def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0):
+    """Função simples para desenhar texto com quebra de linha"""
+    if not text:
+        return y
     
-    for seg_line in logical_lines:
-        if not max_width or max_width <= 0:
-            out.append(seg_line)
+    lines = text.split('\n')
+    line_height = font.size + 4  # Altura da linha baseada no tamanho da fonte
+    
+    for line in lines:
+        if not line.strip():
+            y += line_height
             continue
             
-        # Quebra de linha por largura
-        current_line = []
-        current_width = 0
-        
-        for txt, is_bold in seg_line:
-            if not txt:
-                continue
-                
-            # Divide o texto em palavras
-            words = txt.split(" ")
+        # Quebra de linha por largura se max_width for especificado
+        if max_width > 0:
+            words = line.split()
+            current_line = ""
+            current_y = y
+            
             for word in words:
-                if not word:
-                    continue
-                    
-                font = font_bold if is_bold else font_regular
-                bbox = draw.textbbox((0, 0), word, font=font)
-                word_width = bbox[2] - bbox[0]
+                test_line = current_line + (" " if current_line else "") + word
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                line_width = bbox[2] - bbox[0]
                 
-                # Adiciona espaço se não for a primeira palavra
-                space_width = 0
-                if current_line:
-                    space_bbox = draw.textbbox((0, 0), " ", font=font)
-                    space_width = space_bbox[2] - space_bbox[0]
-                
-                # Verifica se cabe na linha atual
-                if current_width + space_width + word_width <= max_width:
-                    if current_line and space_width > 0:
-                        current_line.append((" ", is_bold))
-                        current_width += space_width
-                    current_line.append((word, is_bold))
-                    current_width += word_width
+                if line_width <= max_width:
+                    current_line = test_line
                 else:
-                    # Quebra a linha
+                    # Desenha a linha atual
                     if current_line:
-                        out.append(current_line)
-                    current_line = [(word, is_bold)]
-                    current_width = word_width
-        
-        # Adiciona a última linha
-        if current_line:
-            out.append(current_line)
+                        draw_text_line(draw, current_line, x, current_y, font, fill, align, max_width)
+                        current_y += line_height
+                    current_line = word
+            
+            # Desenha a última linha
+            if current_line:
+                draw_text_line(draw, current_line, x, current_y, font, fill, align, max_width)
+                y = current_y + line_height
+        else:
+            # Sem quebra de linha por largura
+            draw_text_line(draw, line, x, y, font, fill, align, max_width)
+            y += line_height
     
-    return out
+    return y
 
-def draw_rich_line(draw, x, y, line_segs, font_regular, font_bold, fill):
-    cx = x
-    for tok, is_bold in line_segs:
-        if not tok:
-            continue
-        font = font_bold if is_bold else font_regular
-        draw.text((cx, y), tok, font=font, fill=fill)
-        bbox = draw.textbbox((0, 0), tok, font=font)
-        cx += bbox[2] - bbox[0]
+def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
+    """Desenha uma única linha de texto"""
+    if align == "left":
+        draw.text((x, y), text, font=font, fill=fill)
+    elif align == "center":
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        if max_width > 0:
+            x_center = x + (max_width - text_width) // 2
+        else:
+            x_center = x - text_width // 2
+        draw.text((x_center, y), text, font=font, fill=fill)
+    elif align == "right":
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        if max_width > 0:
+            x_right = x + max_width - text_width
+        else:
+            x_right = x - text_width
+        draw.text((x_right, y), text, font=font, fill=fill)
 
 @app.post("/process-text")
 def process_text():
@@ -208,36 +156,11 @@ def process_text():
     font_name = j.get("font", "Archivo-Regular")
 
     draw = ImageDraw.Draw(img)
-    font_regular = load_font(fs, font_name, "font_archivo")
-    # Carrega a fonte bold correspondente baseada na fonte regular
-    if "Archivo" in font_name:
-        # Se a fonte é Archivo-Medium, usa Archivo-Bold para negrito
-        bold_font_name = font_name.replace("Medium", "Bold").replace("Regular", "Bold")
-    else:
-        bold_font_name = "Archivo-Bold"
-    
-    font_bold = load_font(fs, bold_font_name, "font_archivo")
+    font = load_font(fs, font_name, "font_archivo")
     fill = color_to_rgba(color, opacity)
 
-    rich_lines = layout_rich_lines(text, draw, font_regular, font_bold, max_width)
-    
-    # Log para debug
-    print(f"Texto processado: {text}")
-    print(f"Fonte regular: {font_name}")
-    print(f"Fonte bold: {bold_font_name}")
-    print(f"Linhas processadas: {len(rich_lines)}")
-
-    for seg_line in rich_lines:
-        if align == "left" or not max_width:
-            x_line = x
-        else:
-            w_line = segments_width(draw, seg_line, font_regular, font_bold)
-            if align == "center":
-                x_line = x + (max_width - w_line) // 2
-            else:
-                x_line = x + (max_width - w_line)
-        draw_rich_line(draw, x_line, y, seg_line, font_regular, font_bold, fill)
-        y += line_height
+    # Desenha o texto de forma simples
+    draw_text_simple(draw, text, x, y, font, fill, align, max_width)
 
     out_b64 = encode_b64_image(img, "PNG")
     return jsonify(image_b64=out_b64, width=img.width, height=img.height)
@@ -245,30 +168,6 @@ def process_text():
 @app.get("/health")
 def health():
     return "ok", 200
-
-@app.get("/test-parser")
-def test_parser():
-    """Endpoint para testar o parser de texto rico"""
-    test_text = "Texto normal <b>texto em negrito</b> e mais texto normal"
-    segs = tokenize_rich(test_text)
-    return jsonify({
-        "original": test_text,
-        "segments": segs,
-        "segments_count": len(segs)
-    })
-
-@app.get("/test-cnpj-parser")
-def test_cnpj_parser():
-    """Endpoint para testar o parser com o texto do CNPJ"""
-    test_text = "CNPJ: <b>{{ $('Filtro').item.json.cnpj }}</b>\nPeríodo Auditado: 5 anos\n({{ $('Filtro').item.json.periodoAnalise.inicio }} - {{ $('Filtro').item.json.periodoAnalise.final }})\nEntrega: {{ $('Filtro').item.json.dataEntrega }}"
-    segs = tokenize_rich(test_text)
-    return jsonify({
-        "original": test_text,
-        "segments": segs,
-        "segments_count": len(segs),
-        "bold_segments": [seg for seg in segs if seg[1]],  # Apenas segmentos em negrito
-        "normal_segments": [seg for seg in segs if not seg[1]]  # Apenas segmentos normais
-    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
