@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
-import base64, os, re
+import base64, os
 
 app = Flask(__name__)
 
@@ -98,39 +98,63 @@ def wrap_lines(text, font, draw, max_width):
         result.append(line)
     return result
 
-def parse_bold_segments(text):
-    tokens = re.split(r'(<\/?b>)', str(text), flags=re.IGNORECASE)
-    segments = []
-    is_bold = False
-    for tok in tokens:
-        if not tok:
+def tokenize_rich(text):
+    segs = []
+    bold = False
+    buf = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # <b>
+        if text[i:i+3].lower() == "<b>":
+            if buf:
+                segs.append(("".join(buf), bold))
+                buf = []
+            bold = True
+            i += 3
             continue
-        if re.fullmatch(r'<b>', tok, flags=re.IGNORECASE):
-            is_bold = True
+        # </b>
+        if text[i:i+4].lower() == "</b>":
+            if buf:
+                segs.append(("".join(buf), bold))
+                buf = []
+            bold = False
+            i += 4
             continue
-        if re.fullmatch(r'</b>', tok, flags=re.IGNORECASE):
-            is_bold = False
-            continue
-        segments.append((tok, is_bold))
-    return segments
+        # *...*
+        if text[i] == "*":
+            # só trata como marcador se existir outro * adiante
+            if "*" in text[i+1:]:
+                if buf:
+                    segs.append(("".join(buf), bold))
+                    buf = []
+                bold = not bold
+                i += 1
+                continue
+            # sem par: trata como literal
+        buf.append(text[i])
+        i += 1
+    if buf:
+        segs.append(("".join(buf), bold))
+    return segs
 
 def split_segments_by_newline(segments):
     lines = [[]]
     for txt, bold in segments:
         parts = txt.split("\n")
-        for i, part in enumerate(parts):
+        for idx, part in enumerate(parts):
             if part:
                 lines[-1].append((part, bold))
-            if i < len(parts) - 1:
+            if idx < len(parts) - 1:
                 lines.append([])
     return lines
 
 def segments_width(draw, segs, font_regular, font_bold):
     total = 0
-    for txt, bold in segs:
+    for txt, is_bold in segs:
         if not txt:
             continue
-        font = font_bold if bold else font_regular
+        font = font_bold if is_bold else font_regular
         total += draw.textlength(txt, font=font)
     return int(total)
 
@@ -140,50 +164,47 @@ def wrap_segments_line(segs, draw, font_regular, font_bold, max_width):
     lines = []
     cur = []
     curw = 0
-    for txt, bold in segs:
-        font = font_bold if bold else font_regular
-        parts = re.split(r'(\s+)', txt)
-        for part in parts:
-            if part is None or part == "":
+    for txt, is_bold in segs:
+        font = font_bold if is_bold else font_regular
+        parts = txt.split(" ")
+        for i, word in enumerate(parts):
+            token = (" " + word) if (i > 0) else word
+            if token == "":
                 continue
-            w = draw.textlength(part, font=font)
-            if part.isspace():
-                if cur and curw + w <= max_width:
-                    cur.append((part, bold))
-                    curw += w
-                continue
+            w = draw.textlength(token, font=font)
             if curw + w <= max_width:
-                cur.append((part, bold))
+                cur.append((token, is_bold))
                 curw += w
             else:
                 if cur:
                     lines.append(cur)
                     cur = []
                     curw = 0
+                # quebra palavra longa se necessário
                 buff = ""
-                for ch in part:
+                for ch in token:
                     if draw.textlength(buff + ch, font=font) <= max_width:
                         buff += ch
                     else:
                         if buff:
-                            cur.append((buff, bold))
+                            cur.append((buff, is_bold))
                             lines.append(cur)
                             cur = []
                             buff = ch
                         else:
-                            cur.append((ch, bold))
+                            cur.append((ch, is_bold))
                             lines.append(cur)
                             cur = []
                             buff = ""
                 if buff:
-                    cur.append((buff, bold))
+                    cur.append((buff, is_bold))
                     curw = draw.textlength(buff, font=font)
     if cur:
         lines.append(cur)
     return lines
 
 def layout_rich_lines(text, draw, font_regular, font_bold, max_width):
-    segs = parse_bold_segments(text)
+    segs = tokenize_rich(text)
     logical_lines = split_segments_by_newline(segs)
     out = []
     for seg_line in logical_lines:
@@ -193,10 +214,10 @@ def layout_rich_lines(text, draw, font_regular, font_bold, max_width):
 
 def draw_rich_line(draw, x, y, line_segs, font_regular, font_bold, fill):
     cx = x
-    for tok, bold in line_segs:
+    for tok, is_bold in line_segs:
         if not tok:
             continue
-        font = font_bold if bold else font_regular
+        font = font_bold if is_bold else font_regular
         draw.text((cx, y), tok, font=font, fill=fill)
         cx += draw.textlength(tok, font=font)
 
@@ -205,4 +226,54 @@ def process_text():
     j = request.get_json(silent=True) or {}
     img_b64 = j.get("image_b64") or j.get("image")
     if not img_b64:
-        return jsonify(error="image_b64 ausente"_
+        return jsonify(error="image_b64 ausente"), 400
+    try:
+        img = decode_b64_image(img_b64)
+    except Exception as e:
+        return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
+
+    text = str(j.get("texto") or j.get("text") or "")
+    x = to_px(j.get("x"), 0)
+    y = to_px(j.get("y"), 0)
+    fs = to_px(j.get("font_size"), 40)
+    line_height = to_px(j.get("line_height"), int(fs * 1.2))
+    max_width = to_px(j.get("max_width"), 0)
+    max_chars = to_px(j.get("max_chars"), 0)
+    if max_chars and len(text) > max_chars:
+        text = text[:max_chars].rstrip()
+    align = str(j.get("align", "left")).lower()
+    if align not in ("left", "center", "right"):
+        align = "left"
+    color = j.get("color", "#000000")
+    opacity = to_px(j.get("opacity"), 100)
+    font_name = j.get("font", "Archivo-Regular")
+    fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
+
+    draw = ImageDraw.Draw(img)
+    font_regular = load_font(fs, font_name, fonts_dir)
+    font_bold = load_font(fs, "Archivo-Bold", fonts_dir)
+    fill = color_to_rgba(color, opacity)
+
+    rich_lines = layout_rich_lines(text, draw, font_regular, font_bold, max_width)
+
+    for seg_line in rich_lines:
+        if align == "left" or not max_width:
+            x_line = x
+        else:
+            w_line = segments_width(draw, seg_line, font_regular, font_bold)
+            if align == "center":
+                x_line = x + (max_width - w_line) // 2
+            else:
+                x_line = x + (max_width - w_line)
+        draw_rich_line(draw, x_line, y, seg_line, font_regular, font_bold, fill)
+        y += line_height
+
+    out_b64 = encode_b64_image(img, "PNG")
+    return jsonify(image_b64=out_b64, width=img.width, height=img.height)
+
+@app.get("/health")
+def health():
+    return "ok", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
