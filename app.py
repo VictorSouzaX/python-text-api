@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 import base64, os, re
 
-app = Flask(name)
+Flask(name)
 
 def px(value, default):
 if value is None:
