@@ -98,6 +98,19 @@ def wrap_lines(text, font, draw, max_width):
         result.append(line)
     return result
 
+def draw_text_with_bold(draw, position, text, font_regular, font_bold, fill):
+    x, y = position
+    parts = text.split("**")
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+        if i % 2 == 1:
+            font = font_bold
+        else:
+            font = font_regular
+        draw.text((x, y), part, font=font, fill=fill)
+        x += draw.textlength(part, font=font)
+
 @app.post("/process-text")
 def process_text():
     j = request.get_json(silent=True) or {}
@@ -127,20 +140,21 @@ def process_text():
     fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
 
     draw = ImageDraw.Draw(img)
-    font = load_font(fs, font_name, fonts_dir)
+    font_regular = load_font(fs, font_name, fonts_dir)
+    font_bold = load_font(fs, "Archivo-Bold", fonts_dir)
     fill = color_to_rgba(color, opacity)
-    lines = wrap_lines(text, font, draw, max_width)
+    lines = wrap_lines(text, font_regular, draw, max_width)
 
     for line in lines:
         if align == "left" or not max_width:
             x_line = x
         else:
-            w_line = text_width(draw, line, font)
+            w_line = text_width(draw, line, font_regular)
             if align == "center":
                 x_line = x + (max_width - w_line) // 2
             else:
                 x_line = x + (max_width - w_line)
-        draw.text((x_line, y), line, font=font, fill=fill)
+        draw_text_with_bold(draw, (x_line, y), line, font_regular, font_bold, fill)
         y += line_height
 
     out_b64 = encode_b64_image(img, "PNG")
