@@ -39,9 +39,9 @@ def color_to_rgba(color, opacity=100):
     a = int(rgba[3] * (op / 100.0))
     return (rgba[0], rgba[1], rgba[2], a)
 
-def load_font(size, font_name):
+def load_font(size, font_name, fonts_dir=None):
     size = int(size)
-    root = Path("font_archivo")  # fixo no seu caso
+    root = Path(fonts_dir or "font_archivo")
     if font_name:
         p = root / font_name
         if p.exists():
@@ -74,14 +74,16 @@ def tokenize_rich(text):
     i = 0
     n = len(text)
     while i < n:
-        if text[i:i+3].lower() == "<b>":
+        # Verifica se há caracteres suficientes para "<b>"
+        if i + 2 < n and text[i:i+3].lower() == "<b>":
             if buf:
                 segs.append(("".join(buf), bold))
                 buf = []
             bold = True
             i += 3
             continue
-        if text[i:i+4].lower() == "</b>":
+        # Verifica se há caracteres suficientes para "</b>"
+        if i + 3 < n and text[i:i+4].lower() == "</b>":
             if buf:
                 segs.append(("".join(buf), bold))
                 buf = []
@@ -97,6 +99,8 @@ def tokenize_rich(text):
 def split_segments_by_newline(segments):
     lines = [[]]
     for txt, bold in segments:
+        if not txt:
+            continue
         parts = txt.split("\n")
         for idx, part in enumerate(parts):
             if part:
@@ -111,15 +115,62 @@ def segments_width(draw, segs, font_regular, font_bold):
         if not txt:
             continue
         font = font_bold if is_bold else font_regular
-        total += draw.textlength(txt, font=font)
+        bbox = draw.textbbox((0, 0), txt, font=font)
+        total += bbox[2] - bbox[0]
     return int(total)
 
 def layout_rich_lines(text, draw, font_regular, font_bold, max_width):
     segs = tokenize_rich(text)
     logical_lines = split_segments_by_newline(segs)
     out = []
+    
     for seg_line in logical_lines:
-        out.append(seg_line)
+        if not max_width or max_width <= 0:
+            out.append(seg_line)
+            continue
+            
+        # Quebra de linha por largura
+        current_line = []
+        current_width = 0
+        
+        for txt, is_bold in seg_line:
+            if not txt:
+                continue
+                
+            # Divide o texto em palavras
+            words = txt.split(" ")
+            for word in words:
+                if not word:
+                    continue
+                    
+                font = font_bold if is_bold else font_regular
+                bbox = draw.textbbox((0, 0), word, font=font)
+                word_width = bbox[2] - bbox[0]
+                
+                # Adiciona espaço se não for a primeira palavra
+                space_width = 0
+                if current_line:
+                    space_bbox = draw.textbbox((0, 0), " ", font=font)
+                    space_width = space_bbox[2] - space_bbox[0]
+                
+                # Verifica se cabe na linha atual
+                if current_width + space_width + word_width <= max_width:
+                    if current_line and space_width > 0:
+                        current_line.append((" ", is_bold))
+                        current_width += space_width
+                    current_line.append((word, is_bold))
+                    current_width += word_width
+                else:
+                    # Quebra a linha
+                    if current_line:
+                        out.append(current_line)
+                    current_line = [(word, is_bold)]
+                    current_width = word_width
+        
+        # Adiciona a última linha
+        if current_line:
+            out.append(current_line)
+    
     return out
 
 def draw_rich_line(draw, x, y, line_segs, font_regular, font_bold, fill):
@@ -129,7 +180,8 @@ def draw_rich_line(draw, x, y, line_segs, font_regular, font_bold, fill):
             continue
         font = font_bold if is_bold else font_regular
         draw.text((cx, y), tok, font=font, fill=fill)
-        cx += draw.textlength(tok, font=font)
+        bbox = draw.textbbox((0, 0), tok, font=font)
+        cx += bbox[2] - bbox[0]
 
 @app.post("/process-text")
 def process_text():
@@ -156,8 +208,8 @@ def process_text():
     font_name = j.get("font", "Archivo-Regular")
 
     draw = ImageDraw.Draw(img)
-    font_regular = load_font(fs, font_name)
-    font_bold = load_font(fs, "Archivo-Bold")
+    font_regular = load_font(fs, font_name, "font_archivo")
+    font_bold = load_font(fs, "Archivo-Bold", "font_archivo")
     fill = color_to_rgba(color, opacity)
 
     rich_lines = layout_rich_lines(text, draw, font_regular, font_bold, max_width)
@@ -180,6 +232,17 @@ def process_text():
 @app.get("/health")
 def health():
     return "ok", 200
+
+@app.get("/test-parser")
+def test_parser():
+    """Endpoint para testar o parser de texto rico"""
+    test_text = "Texto normal <b>texto em negrito</b> e mais texto normal"
+    segs = tokenize_rich(test_text)
+    return jsonify({
+        "original": test_text,
+        "segments": segs,
+        "segments_count": len(segs)
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
