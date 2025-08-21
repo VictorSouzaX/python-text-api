@@ -66,24 +66,25 @@ def text_width(draw, text, font):
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0]
 
-def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0):
-    """Função simples para desenhar texto com quebra de linha"""
+def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
+    """Função simples para desenhar texto com quebra de linha e alinhamento vertical"""
     if not text:
         return y
     
-    lines = text.split('\n')
+    # Primeiro, calcula todas as linhas e a altura total
+    all_lines = []
     line_height = font.size + 4  # Altura da linha baseada no tamanho da fonte
     
+    lines = text.split('\n')
     for line in lines:
         if not line.strip():
-            y += line_height
+            all_lines.append("")
             continue
             
         # Quebra de linha por largura se max_width for especificado
         if max_width > 0:
             words = line.split()
             current_line = ""
-            current_y = y
             
             for word in words:
                 test_line = current_line + (" " if current_line else "") + word
@@ -93,22 +94,35 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0):
                 if line_width <= max_width:
                     current_line = test_line
                 else:
-                    # Desenha a linha atual
+                    # Adiciona a linha atual
                     if current_line:
-                        draw_text_line(draw, current_line, x, current_y, font, fill, align, max_width)
-                        current_y += line_height
+                        all_lines.append(current_line)
                     current_line = word
             
-            # Desenha a última linha
+            # Adiciona a última linha
             if current_line:
-                draw_text_line(draw, current_line, x, current_y, font, fill, align, max_width)
-                y = current_y + line_height
+                all_lines.append(current_line)
         else:
             # Sem quebra de linha por largura
-            draw_text_line(draw, line, x, y, font, fill, align, max_width)
-            y += line_height
+            all_lines.append(line)
     
-    return y
+    # Calcula a altura total do texto
+    total_height = len(all_lines) * line_height
+    
+    # Ajusta a posição Y baseada no alinhamento vertical
+    if align_vertical == "center":
+        y = y - (total_height // 2)
+    elif align_vertical == "bottom":
+        y = y - total_height
+    
+    # Agora desenha todas as linhas
+    current_y = y
+    for line in all_lines:
+        if line.strip():
+            draw_text_line(draw, line, x, current_y, font, fill, align, max_width)
+        current_y += line_height
+    
+    return current_y
 
 def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
     """Desenha uma única linha de texto"""
@@ -151,6 +165,9 @@ def process_text():
     align = str(j.get("align", "left")).lower()
     if align not in ("left", "center", "right"):
         align = "left"
+    align_vertical = str(j.get("align_vertical", "top")).lower()
+    if align_vertical not in ("top", "center", "bottom"):
+        align_vertical = "top"
     color = j.get("color", "#000000")
     opacity = to_px(j.get("opacity"), 100)
     font_name = j.get("font", "Archivo-Regular")
@@ -160,7 +177,7 @@ def process_text():
     fill = color_to_rgba(color, opacity)
 
     # Desenha o texto de forma simples
-    draw_text_simple(draw, text, x, y, font, fill, align, max_width)
+    draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
 
     out_b64 = encode_b64_image(img, "PNG")
     return jsonify(image_b64=out_b64, width=img.width, height=img.height)
