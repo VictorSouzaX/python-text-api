@@ -5,6 +5,7 @@ from pathlib import Path
 import base64, os, re
 
 app = Flask(name)
+
 def px(value, default):
 if value is None:
 return default
@@ -48,30 +49,31 @@ raise FileNotFoundError("font: vazio")
 root = Path(fonts_dir or DEFAULT_FONTS_DIR)
 if not root.exists():
 raise FileNotFoundError(f"fonts_dir não encontrado: {root.resolve()}")
-
 p = root / name
 if p.exists():
-    return str(p)
-
+return str(p)
 for ext in (".ttf", ".otf", ".ttc"):
-    q = root / (name if name.lower().endswith(ext) else f"{name}{ext}")
-    if q.exists():
-        return str(q)
-
+q = root / (name if name.lower().endswith(ext) else f"{name}{ext}")
+if q.exists():
+return str(q)
 wanted = re.sub(r"[-_ .]", "", Path(name).stem).casefold()
-for ext in ("*.ttf", "*.otf", "*.ttc"):
-    for f in root.rglob(ext):
-        key = re.sub(r"[-_ .]", "", f.stem).casefold()
-        if key == wanted:
-            return str(f)
-
+for ext in (".ttf", ".otf", "*.ttc"):
+for f in root.rglob(ext):
+key = re.sub(r"[-_ .]", "", f.stem).casefold()
+if key == wanted:
+return str(f)
 raise FileNotFoundError(f"Fonte não encontrada: {name}")
+
 def load_font(size, name="Archivo-Regular", fonts_dir=None):
 try:
 path = find_font_path(name, fonts_dir)
 return ImageFont.truetype(path, int(size))
 except Exception:
 return ImageFont.load_default()
+
+def text_width(draw, text, font):
+bbox = draw.textbbox((0, 0), text, font=font)
+return bbox[2] - bbox[0]
 
 def wrap_lines(text, font, draw, max_width):
 if not max_width or max_width <= 0:
@@ -85,7 +87,7 @@ continue
 line = ""
 for w in words:
 test = w if line == "" else f"{line} {w}"
-w_px = draw.textbbox((0, 0), test, font=font)[2]
+w_px = text_width(draw, test, font)
 if w_px <= max_width:
 line = test
 else:
@@ -93,7 +95,7 @@ if line == "":
 buff = ""
 for ch in w:
 t2 = buff + ch
-if draw.textbbox((0, 0), t2, font=font)[2] > max_width:
+if text_width(draw, t2, font) > max_width:
 if buff:
 result.append(buff)
 buff = ch
@@ -113,57 +115,48 @@ return "ok", 200
 @app.post("/process-text")
 def process_text():
 j = request.get_json(silent=True) or {}
-
 img_b64 = j.get("image_b64") or j.get("image")
 if not img_b64:
-    return jsonify(error="image_b64 ausente"), 400
-
+return jsonify(error="image_b64 ausente"), 400
 try:
-    img = decode_b64_image(img_b64)
+img = decode_b64_image(img_b64)
 except Exception as e:
-    return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
-
+return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 text = str(j.get("texto") or j.get("text") or "")
 x = px(j.get("x"), 0)
 y = px(j.get("y"), 0)
 fs = px(j.get("font_size"), 40)
 line_height = px(j.get("line_height"), 0)
 if line_height <= 0:
-    line_height = int(fs * 1.2)
-
+line_height = int(fs * 1.2)
 max_width = px(j.get("max_width"), 0)
 max_chars = px(j.get("max_chars"), 0)
 if max_chars and len(text) > max_chars:
-    text = text[:max_chars].rstrip()
-
+text = text[:max_chars].rstrip()
 align = str(j.get("align", "left")).lower()
 if align not in ("left", "center", "right"):
-    align = "left"
-
+align = "left"
 color = j.get("color", "#000000")
 opacity = px(j.get("opacity"), 100)
 font_name = j.get("font", "Archivo-Regular")
 fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
-
 draw = ImageDraw.Draw(img)
 font = load_font(fs, font_name, fonts_dir)
 fill = color_to_rgba(color, opacity)
-
 lines = wrap_lines(text, font, draw, max_width)
-
 for line in lines:
-    if align == "left" or not max_width:
-        x_line = x
-    else:
-        w_line = draw.textbbox((0, 0), line, font=font)[2]
-        if align == "center":
-            x_line = x + (max_width - w_line) // 2
-        else:
-            x_line = x + (max_width - w_line)
-    draw.text((x_line, y), line, font=font, fill=fill)
-    y += line_height
-
+if align == "left" or not max_width:
+x_line = x
+else:
+w_line = text_width(draw, line, font)
+if align == "center":
+x_line = x + (max_width - w_line) // 2
+else:
+x_line = x + (max_width - w_line)
+draw.text((x_line, y), line, font=font, fill=fill)
+y += line_height
 out_b64 = encode_b64_image(img, "PNG")
 return jsonify(image_b64=out_b64, width=img.width, height=img.height)
+
 if name == "main":
 app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
