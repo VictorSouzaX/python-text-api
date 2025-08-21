@@ -6,7 +6,6 @@ import base64, os, re
 
 app = Flask(name)
 
---------- util ---------
 def px(value, default):
 if value is None:
 return default
@@ -42,7 +41,6 @@ op = max(0, min(100, int(px(opacity, 100))))
 a = int(rgba[3] * (op / 100.0))
 return (rgba[0], rgba[1], rgba[2], a)
 
---------- fontes ---------
 DEFAULT_FONTS_DIR = Path(os.getenv("FONTS_DIR", "font_archivo"))
 
 def find_font_path(name, fonts_dir=None):
@@ -79,7 +77,6 @@ return ImageFont.truetype(path, int(size))
 except Exception:
 return ImageFont.load_default()
 
---------- texto / quebra ---------
 def wrap_lines(text, font, draw, max_width):
 if not max_width or max_width <= 0:
 return str(text).split("\n")
@@ -114,7 +111,6 @@ line = w
 result.append(line)
 return result
 
---------- rotas ---------
 @app.get("/health")
 def health():
 return "ok", 200
