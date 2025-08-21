@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
-import base64, os
+import base64, os, re
 
 app = Flask(__name__)
 
@@ -98,71 +98,111 @@ def wrap_lines(text, font, draw, max_width):
         result.append(line)
     return result
 
-def draw_text_with_bold(draw, position, text, font_regular, font_bold, fill):
-    x, y = position
-    parts = text.split("**")
-    for i, part in enumerate(parts):
-        if not part:
+def parse_bold_segments(text):
+    tokens = re.split(r'(<\/?b>)', str(text), flags=re.IGNORECASE)
+    segments = []
+    is_bold = False
+    for tok in tokens:
+        if not tok:
             continue
-        if i % 2 == 1:
-            font = font_bold
-        else:
-            font = font_regular
-        draw.text((x, y), part, font=font, fill=fill)
-        x += draw.textlength(part, font=font)
+        if re.fullmatch(r'<b>', tok, flags=re.IGNORECASE):
+            is_bold = True
+            continue
+        if re.fullmatch(r'</b>', tok, flags=re.IGNORECASE):
+            is_bold = False
+            continue
+        segments.append((tok, is_bold))
+    return segments
+
+def split_segments_by_newline(segments):
+    lines = [[]]
+    for txt, bold in segments:
+        parts = txt.split("\n")
+        for i, part in enumerate(parts):
+            if part:
+                lines[-1].append((part, bold))
+            if i < len(parts) - 1:
+                lines.append([])
+    return lines
+
+def segments_width(draw, segs, font_regular, font_bold):
+    total = 0
+    for txt, bold in segs:
+        if not txt:
+            continue
+        font = font_bold if bold else font_regular
+        total += draw.textlength(txt, font=font)
+    return int(total)
+
+def wrap_segments_line(segs, draw, font_regular, font_bold, max_width):
+    if not max_width or max_width <= 0:
+        return [segs]
+    lines = []
+    cur = []
+    curw = 0
+    for txt, bold in segs:
+        font = font_bold if bold else font_regular
+        parts = re.split(r'(\s+)', txt)
+        for part in parts:
+            if part is None or part == "":
+                continue
+            w = draw.textlength(part, font=font)
+            if part.isspace():
+                if cur and curw + w <= max_width:
+                    cur.append((part, bold))
+                    curw += w
+                continue
+            if curw + w <= max_width:
+                cur.append((part, bold))
+                curw += w
+            else:
+                if cur:
+                    lines.append(cur)
+                    cur = []
+                    curw = 0
+                buff = ""
+                for ch in part:
+                    if draw.textlength(buff + ch, font=font) <= max_width:
+                        buff += ch
+                    else:
+                        if buff:
+                            cur.append((buff, bold))
+                            lines.append(cur)
+                            cur = []
+                            buff = ch
+                        else:
+                            cur.append((ch, bold))
+                            lines.append(cur)
+                            cur = []
+                            buff = ""
+                if buff:
+                    cur.append((buff, bold))
+                    curw = draw.textlength(buff, font=font)
+    if cur:
+        lines.append(cur)
+    return lines
+
+def layout_rich_lines(text, draw, font_regular, font_bold, max_width):
+    segs = parse_bold_segments(text)
+    logical_lines = split_segments_by_newline(segs)
+    out = []
+    for seg_line in logical_lines:
+        wrapped = wrap_segments_line(seg_line, draw, font_regular, font_bold, max_width)
+        out.extend(wrapped)
+    return out
+
+def draw_rich_line(draw, x, y, line_segs, font_regular, font_bold, fill):
+    cx = x
+    for tok, bold in line_segs:
+        if not tok:
+            continue
+        font = font_bold if bold else font_regular
+        draw.text((cx, y), tok, font=font, fill=fill)
+        cx += draw.textlength(tok, font=font)
 
 @app.post("/process-text")
 def process_text():
     j = request.get_json(silent=True) or {}
     img_b64 = j.get("image_b64") or j.get("image")
     if not img_b64:
-        return jsonify(error="image_b64 ausente"), 400
-    try:
-        img = decode_b64_image(img_b64)
-    except Exception as e:
-        return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
-
-    text = str(j.get("texto") or j.get("text") or "")
-    x = to_px(j.get("x"), 0)
-    y = to_px(j.get("y"), 0)
-    fs = to_px(j.get("font_size"), 40)
-    line_height = to_px(j.get("line_height"), int(fs * 1.2))
-    max_width = to_px(j.get("max_width"), 0)
-    max_chars = to_px(j.get("max_chars"), 0)
-    if max_chars and len(text) > max_chars:
-        text = text[:max_chars].rstrip()
-    align = str(j.get("align", "left")).lower()
-    if align not in ("left", "center", "right"):
-        align = "left"
-    color = j.get("color", "#000000")
-    opacity = to_px(j.get("opacity"), 100)
-    font_name = j.get("font", "Archivo-Regular")
-    fonts_dir = j.get("fonts_dir") or os.getenv("FONTS_DIR", "font_archivo")
-
-    draw = ImageDraw.Draw(img)
-    font_regular = load_font(fs, font_name, fonts_dir)
-    font_bold = load_font(fs, "Archivo-Bold", fonts_dir)
-    fill = color_to_rgba(color, opacity)
-    lines = wrap_lines(text, font_regular, draw, max_width)
-
-    for line in lines:
-        if align == "left" or not max_width:
-            x_line = x
-        else:
-            w_line = text_width(draw, line, font_regular)
-            if align == "center":
-                x_line = x + (max_width - w_line) // 2
-            else:
-                x_line = x + (max_width - w_line)
-        draw_text_with_bold(draw, (x_line, y), line, font_regular, font_bold, fill)
-        y += line_height
-
-    out_b64 = encode_b64_image(img, "PNG")
-    return jsonify(image_b64=out_b64, width=img.width, height=img.height)
-
-@app.get("/health")
-def health():
-    return "ok", 200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+        return jsonify(error="image_b64 ausente"_
