@@ -5,7 +5,6 @@ from pathlib import Path
 import base64, os, re
 
 app = Flask(name)
-
 def px(value, default):
 if value is None:
 return default
@@ -50,18 +49,15 @@ root = Path(fonts_dir or DEFAULT_FONTS_DIR)
 if not root.exists():
 raise FileNotFoundError(f"fonts_dir não encontrado: {root.resolve()}")
 
-# caminho direto
 p = root / name
 if p.exists():
     return str(p)
 
-# tenta com extensão
 for ext in (".ttf", ".otf", ".ttc"):
     q = root / (name if name.lower().endswith(ext) else f"{name}{ext}")
     if q.exists():
         return str(q)
 
-# normaliza e procura recursivamente
 wanted = re.sub(r"[-_ .]", "", Path(name).stem).casefold()
 for ext in ("*.ttf", "*.otf", "*.ttc"):
     for f in root.rglob(ext):
@@ -94,7 +90,6 @@ if w_px <= max_width:
 line = test
 else:
 if line == "":
-# palavra sozinha maior que a largura: faz corte duro
 buff = ""
 for ch in w:
 t2 = buff + ch
@@ -163,7 +158,7 @@ for line in lines:
         w_line = draw.textbbox((0, 0), line, font=font)[2]
         if align == "center":
             x_line = x + (max_width - w_line) // 2
-        else:  # right
+        else:
             x_line = x + (max_width - w_line)
     draw.text((x_line, y), line, font=font, fill=fill)
     y += line_height
@@ -172,19 +167,3 @@ out_b64 = encode_b64_image(img, "PNG")
 return jsonify(image_b64=out_b64, width=img.width, height=img.height)
 if name == "main":
 app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
-
-requirements.txt:
-
-flask==3.0.3
-pillow==10.4.0
-
-Dockerfile (opcional):
-
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-ENV FONTS_DIR=/app/font_archivo
-EXPOSE 8080
-CMD ["python", "app.py"]
