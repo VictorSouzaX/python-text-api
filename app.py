@@ -209,10 +209,23 @@ def process_text():
 
     draw = ImageDraw.Draw(img)
     font_regular = load_font(fs, font_name, "font_archivo")
-    font_bold = load_font(fs, "Archivo-Bold", "font_archivo")
+    # Carrega a fonte bold correspondente baseada na fonte regular
+    if "Archivo" in font_name:
+        # Se a fonte é Archivo-Medium, usa Archivo-Bold para negrito
+        bold_font_name = font_name.replace("Medium", "Bold").replace("Regular", "Bold")
+    else:
+        bold_font_name = "Archivo-Bold"
+    
+    font_bold = load_font(fs, bold_font_name, "font_archivo")
     fill = color_to_rgba(color, opacity)
 
     rich_lines = layout_rich_lines(text, draw, font_regular, font_bold, max_width)
+    
+    # Log para debug
+    print(f"Texto processado: {text}")
+    print(f"Fonte regular: {font_name}")
+    print(f"Fonte bold: {bold_font_name}")
+    print(f"Linhas processadas: {len(rich_lines)}")
 
     for seg_line in rich_lines:
         if align == "left" or not max_width:
@@ -244,5 +257,19 @@ def test_parser():
         "segments_count": len(segs)
     })
 
+@app.get("/test-cnpj-parser")
+def test_cnpj_parser():
+    """Endpoint para testar o parser com o texto do CNPJ"""
+    test_text = "CNPJ: <b>{{ $('Filtro').item.json.cnpj }}</b>\nPeríodo Auditado: 5 anos\n({{ $('Filtro').item.json.periodoAnalise.inicio }} - {{ $('Filtro').item.json.periodoAnalise.final }})\nEntrega: {{ $('Filtro').item.json.dataEntrega }}"
+    segs = tokenize_rich(test_text)
+    return jsonify({
+        "original": test_text,
+        "segments": segs,
+        "segments_count": len(segs),
+        "bold_segments": [seg for seg in segs if seg[1]],  # Apenas segmentos em negrito
+        "normal_segments": [seg for seg in segs if not seg[1]]  # Apenas segmentos normais
+    })
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    
