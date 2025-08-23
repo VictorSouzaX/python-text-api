@@ -67,11 +67,9 @@ def text_width(draw, text, font):
     return bbox[2] - bbox[0]
 
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
-    """Desenha texto com quebra de linha, alinhamento horizontal e vertical"""
     if not text:
         return y
 
-    # Quebra o texto em linhas (manual ou por largura)
     all_lines = []
     lines = text.split("\n")
 
@@ -98,20 +96,15 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
         else:
             all_lines.append(line)
 
-    # Usa métricas da fonte para altura real da linha
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
-
-    # Altura total do bloco
     total_height = len(all_lines) * line_height
 
-    # Ajuste vertical
     if align_vertical == "center":
         y = y - total_height // 2
     elif align_vertical == "bottom":
         y = y - total_height
 
-    # Renderiza linha a linha
     current_y = y
     for line in all_lines:
         if line.strip():
@@ -121,7 +114,6 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
     return current_y
 
 def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
-    """Desenha uma linha de texto com alinhamento horizontal"""
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
 
@@ -168,14 +160,21 @@ def process_text():
     opacity = to_px(j.get("opacity"), 100)
     font_name = j.get("font", "Archivo-Regular")
 
-    draw = ImageDraw.Draw(img)
-    font = load_font(fs, font_name, "font_archivo")
-    fill = color_to_rgba(color, opacity)
-
+    # >>>> ALTERAÇÃO PARA FUNCIONAR OPACITY <<<<<<
     try:
+        # 1. Cria camada RGBA transparente para o texto
+        layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        font = load_font(fs, font_name, "font_archivo")
+        fill = color_to_rgba(color, opacity)
+
         final_y = draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
+
+        # 2. Usa alpha_composite para transferir o texto com alfa pra imagem original
+        img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
+    # >>>>>>> FIM ALTERAÇÃO <<<<<<<<<<<<<<
 
     try:
         out_b64 = encode_b64_image(img, "PNG")
