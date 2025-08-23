@@ -145,36 +145,44 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
-    text = str(j.get("texto") or j.get("text") or "")
-    x = to_px(j.get("x"), 0)
-    y = to_px(j.get("y"), 0)
-    fs = to_px(j.get("font_size"), 40)
-    max_width = to_px(j.get("max_width"), 0)
-    align = str(j.get("align", "left")).lower()
-    if align not in ("left", "center", "right"):
-        align = "left"
-    align_vertical = str(j.get("align_vertical", "top")).lower()
-    if align_vertical not in ("top", "center", "bottom"):
-        align_vertical = "top"
-    color = j.get("color", "#000000")
-    opacity = to_px(j.get("opacity"), 100)
-    font_name = j.get("font", "Archivo-Regular")
+    textos = j.get("textos", None)  # Esperado: lista de configs de textos
 
-    # >>>> ALTERAÇÃO PARA FUNCIONAR OPACITY <<<<<<
+    if textos is None:
+        # fallback (compatível com requests legados com apenas 1 texto)
+        textos = [j]
+
+    if not isinstance(textos, list):
+        return jsonify(error="Campo 'textos' deve ser uma lista (array de objetos)"), 400
+
     try:
-        # 1. Cria camada RGBA transparente para o texto
-        layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(layer)
-        font = load_font(fs, font_name, "font_archivo")
-        fill = color_to_rgba(color, opacity)
+        for t in textos:
+            text = str(t.get("texto") or t.get("text") or "")
+            x = to_px(t.get("x"), 0)
+            y = to_px(t.get("y"), 0)
+            fs = to_px(t.get("font_size"), 40)
+            max_width = to_px(t.get("max_width"), 0)
+            align = str(t.get("align", "left")).lower()
+            if align not in ("left", "center", "right"):
+                align = "left"
+            align_vertical = str(t.get("align_vertical", "top")).lower()
+            if align_vertical not in ("top", "center", "bottom"):
+                align_vertical = "top"
+            color = t.get("color", "#000000")
+            opacity = to_px(t.get("opacity"), 100)
+            font_name = t.get("font", "Archivo-Regular")
 
-        final_y = draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
+            # 1. Cria camada RGBA transparente para o texto
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(layer)
+            font = load_font(fs, font_name, "font_archivo")
+            fill = color_to_rgba(color, opacity)
 
-        # 2. Usa alpha_composite para transferir o texto com alfa pra imagem original
-        img = Image.alpha_composite(img, layer)
+            draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
+
+            # 2. Usa alpha_composite para transferir o texto com alfa pra imagem original
+            img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
-    # >>>>>>> FIM ALTERAÇÃO <<<<<<<<<<<<<<
 
     try:
         out_b64 = encode_b64_image(img, "PNG")
