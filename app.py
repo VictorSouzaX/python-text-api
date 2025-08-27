@@ -63,19 +63,30 @@ def load_font(size, font_name, fonts_dir=None):
         return ImageFont.load_default()
 
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
+    """
+    Desenha um bloco de texto usando uma 'caixa invisível' definida por:
+      - referência x,y (interpreted conforme align/align_vertical)
+      - largura da caixa: max_width (quando > 0)
+    Regras:
+      - x é o ponto de referência da caixa:
+          align="left"   -> x = left edge da caixa
+          align="center" -> x = center da caixa
+          align="right"  -> x = right edge da caixa
+      - max_width serve apenas para quebra de linha; o cálculo da posição usa a interpretação de x acima.
+      - align_vertical similar: y é top/center/bottom da caixa.
+    """
     if not text:
         return y
 
-    # Quebra de linhas
+    # Quebra de linhas respeitando max_width (em px)
     all_lines = []
     lines = text.split("\n")
-
     for line in lines:
         if not line.strip():
             all_lines.append("")
             continue
 
-        if max_width > 0:
+        if max_width and max_width > 0:
             words = line.split()
             current_line = ""
             for word in words:
@@ -93,44 +104,75 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
         else:
             all_lines.append(line)
 
-    # Altura do texto
-    ascent, descent = font.getmetrics()
-    line_height = ascent + descent
+    # Métricas de linha
+    try:
+        ascent, descent = font.getmetrics()
+        line_height = ascent + descent
+    except Exception:
+        # fallback razoável
+        line_height = int(font.size * 1.2)
+
     total_height = len(all_lines) * line_height
 
-    # Ajuste vertical pela "caixa invisível"
-    if align_vertical == "center":
-        y = y + (total_height // 2 * -1)
+    # Calcula top da caixa invisível (onde começa o primeiro line_y)
+    if align_vertical == "top":
+        box_top = int(y)
+    elif align_vertical == "center":
+        box_top = int(y - total_height / 2)
     elif align_vertical == "bottom":
-        y = y - total_height
+        box_top = int(y - total_height)
+    else:
+        box_top = int(y)
 
-    current_y = y
+    # Se houver max_width, calcula left da caixa invisível a partir de x e align
+    if max_width and max_width > 0:
+        if align == "left":
+            box_left = int(x)
+        elif align == "center":
+            box_left = int(x - max_width / 2)
+        elif align == "right":
+            box_left = int(x - max_width)
+        else:
+            box_left = int(x)
+    else:
+        box_left = None  # não existe caixa fixa
+
+    # Desenha cada linha: calcula texto_x com base na caixa (quando existir) ou com base em x
+    current_y = box_top
     for line in all_lines:
-        if line.strip():
-            draw_text_line(draw, line, x, current_y, font, fill, align, max_width)
+        if line.strip() == "":
+            current_y += line_height
+            continue
+
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_width = bbox[2] - bbox[0]
+
+        if box_left is not None:
+            # Temos uma caixa com largura max_width
+            if align == "left":
+                text_x = box_left
+            elif align == "center":
+                # centraliza dentro da caixa
+                text_x = box_left + int((max_width - text_width) / 2)
+            elif align == "right":
+                text_x = box_left + int(max_width - text_width)
+            else:
+                text_x = box_left
+        else:
+            # Sem caixa, interpreta x como referência direta:
+            if align == "left":
+                text_x = int(x)
+            elif align == "center":
+                text_x = int(x - text_width / 2)
+            elif align == "right":
+                text_x = int(x - text_width)
+            else:
+                text_x = int(x)
+
+        draw.text((text_x, current_y), line, font=font, fill=fill)
         current_y += line_height
 
     return current_y
-
-def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-
-    # Ajuste horizontal pela "caixa invisível"
-    if align == "left":
-        draw.text((x, y), text, font=font, fill=fill)
-    elif align == "center":
-        if max_width > 0:
-            x_center = x + (max_width // 2) - (text_width // 2)
-            draw.text((x_center, y), text, font=font, fill=fill)
-        else:
-            draw.text((x - text_width // 2, y), text, font=font, fill=fill)
-    elif align == "right":
-        if max_width > 0:
-            x_right = x + max_width - text_width
-            draw.text((x_right, y), text, font=font, fill=fill)
-        else:
-            draw.text((x - text_width, y), text, font=font, fill=fill)
 
 @app.post("/process-text")
 def process_text():
@@ -145,7 +187,10 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
-    textos = j.get("textos", None) or [j]
+    textos = j.get("textos", None)
+
+    if textos is None:
+        textos = [j]
 
     if not isinstance(textos, list):
         return jsonify(error="Campo 'textos' deve ser uma lista (array de objetos)"), 400
@@ -167,14 +212,16 @@ def process_text():
             opacity = to_px(t.get("opacity"), 100)
             font_name = t.get("font", "Archivo-Regular")
 
-            # Cria camada RGBA transparente para o texto
+            # 1. Cria camada RGBA transparente para o texto
             layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(layer)
             font = load_font(fs, font_name, "font_archivo")
             fill = color_to_rgba(color, opacity)
 
+            # 2. Desenha texto na layer respeitando caixa invisível
             draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
 
+            # 3. Compoe na imagem original
             img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
