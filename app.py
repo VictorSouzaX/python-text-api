@@ -49,6 +49,7 @@ def load_font(size, font_name, fonts_dir=None):
                 return ImageFont.truetype(str(p), size)
             except Exception:
                 pass
+        # tenta extensões comuns se o nome veio sem extensão
         if not str(font_name).lower().endswith((".ttf", ".otf", ".ttc")):
             for ext in (".ttf", ".otf", ".ttc"):
                 q = root / (str(font_name) + ext)
@@ -65,25 +66,26 @@ def load_font(size, font_name, fonts_dir=None):
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
     """
     Desenha um bloco de texto usando uma 'caixa invisível' definida por:
-      - referência x,y (interpreted conforme align/align_vertical)
-      - largura da caixa: max_width (quando > 0)
-    Regras:
-      - x é o ponto de referência da caixa:
-          align="left"   -> x = left edge da caixa
-          align="center" -> x = center da caixa
-          align="right"  -> x = right edge da caixa
-      - max_width serve apenas para quebra de linha; o cálculo da posição usa a interpretação de x acima.
-      - align_vertical similar: y é top/center/bottom da caixa.
+      - referencia x,y (interpretada conforme align / align_vertical)
+      - max_width: serve apenas para quebra de linha (quando > 0)
+    Regras horizontais:
+      - align == "left"   -> x é a borda esquerda de referência
+      - align == "center" -> x é o centro de referência (o centro do texto/linha ficará em x)
+      - align == "right"  -> x é a borda direita de referência (o lado direito do texto ficará em x)
+    Regras verticais:
+      - align_vertical == "top"    -> y é o topo da caixa (primeira linha começa em y)
+      - align_vertical == "center" -> y é o centro da caixa (centro do bloco de linhas ficará em y)
+      - align_vertical == "bottom" -> y é o fundo da caixa (última linha ficará encostada em y)
     """
     if not text:
         return y
 
-    # Quebra de linhas respeitando max_width (em px)
+    # 1) Quebra de linhas respeitando max_width
     all_lines = []
     lines = text.split("\n")
     for line in lines:
         if not line.strip():
-            all_lines.append("")
+            all_lines.append("")  # mantem linhas vazias
             continue
 
         if max_width and max_width > 0:
@@ -96,78 +98,66 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
                 if line_width <= max_width:
                     current_line = test_line
                 else:
+                    # se current_line vazio e a única palavra é maior que max_width,
+                    # ainda assim inserimos a palavra (não vamos cortar palavras).
                     if current_line:
                         all_lines.append(current_line)
+                    else:
+                        # palavra sozinha > max_width: coloca mesmo assim
+                        all_lines.append(word)
+                        current_line = ""
+                        continue
                     current_line = word
             if current_line:
                 all_lines.append(current_line)
         else:
             all_lines.append(line)
 
-    # Métricas de linha
+    # 2) Métricas de linha
     try:
         ascent, descent = font.getmetrics()
         line_height = ascent + descent
     except Exception:
         # fallback razoável
-        line_height = int(font.size * 1.2)
+        try:
+            line_height = int(font.size * 1.2)
+        except Exception:
+            line_height = 16
 
     total_height = len(all_lines) * line_height
 
-    # Calcula top da caixa invisível (onde começa o primeiro line_y)
+    # 3) Calcula top da caixa invisível (onde começa a primeira linha)
     if align_vertical == "top":
         box_top = int(y)
     elif align_vertical == "center":
-        box_top = int(y - total_height / 2)
+        # queremos que o centro do bloco (box_top + total_height/2) seja y
+        box_top = int(round(y - total_height / 2))
     elif align_vertical == "bottom":
-        box_top = int(y - total_height)
+        # queremos que box_top + total_height == y
+        box_top = int(round(y - total_height))
     else:
         box_top = int(y)
 
-    # Se houver max_width, calcula left da caixa invisível a partir de x e align
-    if max_width and max_width > 0:
-        if align == "left":
-            box_left = int(x)
-        elif align == "center":
-            box_left = int(x - max_width / 2)
-        elif align == "right":
-            box_left = int(x - max_width)
-        else:
-            box_left = int(x)
-    else:
-        box_left = None  # não existe caixa fixa
-
-    # Desenha cada linha: calcula texto_x com base na caixa (quando existir) ou com base em x
+    # 4) Desenha cada linha; posicionamento horizontal baseado em x + align.
     current_y = box_top
     for line in all_lines:
-        if line.strip() == "":
+        if line == "":
             current_y += line_height
             continue
 
         bbox = draw.textbbox((0, 0), line, font=font)
         text_width = bbox[2] - bbox[0]
 
-        if box_left is not None:
-            # Temos uma caixa com largura max_width
-            if align == "left":
-                text_x = box_left
-            elif align == "center":
-                # centraliza dentro da caixa
-                text_x = box_left + int((max_width - text_width) / 2)
-            elif align == "right":
-                text_x = box_left + int(max_width - text_width)
-            else:
-                text_x = box_left
-        else:
-            # Sem caixa, interpreta x como referência direta:
-            if align == "left":
-                text_x = int(x)
-            elif align == "center":
-                text_x = int(x - text_width / 2)
-            elif align == "right":
-                text_x = int(x - text_width)
-            else:
-                text_x = int(x)
+        # Regra simples e direta: x é sempre o ponto de referência pedido
+        # - center -> centro do texto fica em x
+        # - left   -> esquerda do texto fica em x
+        # - right  -> direita do texto fica em x
+        if align == "center":
+            text_x = int(round(x - text_width / 2))
+        elif align == "right":
+            text_x = int(round(x - text_width))
+        else:  # left ou fallback
+            text_x = int(round(x))
 
         draw.text((text_x, current_y), line, font=font, fill=fill)
         current_y += line_height
@@ -188,7 +178,6 @@ def process_text():
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
     textos = j.get("textos", None)
-
     if textos is None:
         textos = [j]
 
@@ -212,16 +201,16 @@ def process_text():
             opacity = to_px(t.get("opacity"), 100)
             font_name = t.get("font", "Archivo-Regular")
 
-            # 1. Cria camada RGBA transparente para o texto
+            # Cria camada RGBA transparente para o texto
             layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(layer)
             font = load_font(fs, font_name, "font_archivo")
             fill = color_to_rgba(color, opacity)
 
-            # 2. Desenha texto na layer respeitando caixa invisível
+            # Desenha texto na layer respeitando a caixa invisível (x,y como referência)
             draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
 
-            # 3. Compoe na imagem original
+            # Compoe na imagem original
             img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
