@@ -62,14 +62,11 @@ def load_font(size, font_name, fonts_dir=None):
     except Exception:
         return ImageFont.load_default()
 
-def text_width(draw, text, font):
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0]
-
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
     if not text:
         return y
 
+    # Quebra de linhas
     all_lines = []
     lines = text.split("\n")
 
@@ -96,12 +93,14 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
         else:
             all_lines.append(line)
 
+    # Altura do texto
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
     total_height = len(all_lines) * line_height
 
+    # Ajuste vertical pela "caixa invisível"
     if align_vertical == "center":
-        y = y - total_height // 2
+        y = y + (total_height // 2 * -1)
     elif align_vertical == "bottom":
         y = y - total_height
 
@@ -117,20 +116,21 @@ def draw_text_line(draw, text, x, y, font, fill, align="left", max_width=0):
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
 
+    # Ajuste horizontal pela "caixa invisível"
     if align == "left":
         draw.text((x, y), text, font=font, fill=fill)
     elif align == "center":
         if max_width > 0:
-            x_center = x + (max_width - text_width) // 2
+            x_center = x + (max_width // 2) - (text_width // 2)
+            draw.text((x_center, y), text, font=font, fill=fill)
         else:
-            x_center = x - text_width // 2
-        draw.text((x_center, y), text, font=font, fill=fill)
+            draw.text((x - text_width // 2, y), text, font=font, fill=fill)
     elif align == "right":
         if max_width > 0:
             x_right = x + max_width - text_width
+            draw.text((x_right, y), text, font=font, fill=fill)
         else:
-            x_right = x - text_width
-        draw.text((x_right, y), text, font=font, fill=fill)
+            draw.text((x - text_width, y), text, font=font, fill=fill)
 
 @app.post("/process-text")
 def process_text():
@@ -145,11 +145,7 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
-    textos = j.get("textos", None)  # Esperado: lista de configs de textos
-
-    if textos is None:
-        # fallback (compatível com requests legados com apenas 1 texto)
-        textos = [j]
+    textos = j.get("textos", None) or [j]
 
     if not isinstance(textos, list):
         return jsonify(error="Campo 'textos' deve ser uma lista (array de objetos)"), 400
@@ -171,7 +167,7 @@ def process_text():
             opacity = to_px(t.get("opacity"), 100)
             font_name = t.get("font", "Archivo-Regular")
 
-            # 1. Cria camada RGBA transparente para o texto
+            # Cria camada RGBA transparente para o texto
             layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(layer)
             font = load_font(fs, font_name, "font_archivo")
@@ -179,7 +175,6 @@ def process_text():
 
             draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
 
-            # 2. Usa alpha_composite para transferir o texto com alfa pra imagem original
             img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
