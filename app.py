@@ -49,7 +49,6 @@ def load_font(size, font_name, fonts_dir=None):
                 return ImageFont.truetype(str(p), size)
             except Exception:
                 pass
-        # tenta extensões comuns se o nome veio sem extensão
         if not str(font_name).lower().endswith((".ttf", ".otf", ".ttc")):
             for ext in (".ttf", ".otf", ".ttc"):
                 q = root / (str(font_name) + ext)
@@ -64,28 +63,14 @@ def load_font(size, font_name, fonts_dir=None):
         return ImageFont.load_default()
 
 def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, align_vertical="top"):
-    """
-    Desenha um bloco de texto usando uma 'caixa invisível' definida por:
-      - referencia x,y (interpretada conforme align / align_vertical)
-      - max_width: serve apenas para quebra de linha (quando > 0)
-    Regras horizontais:
-      - align == "left"   -> x é a borda esquerda de referência
-      - align == "center" -> x é o centro de referência (o centro do texto/linha ficará em x)
-      - align == "right"  -> x é a borda direita de referência (o lado direito do texto ficará em x)
-    Regras verticais:
-      - align_vertical == "top"    -> y é o topo da caixa (primeira linha começa em y)
-      - align_vertical == "center" -> y é o centro da caixa (centro do bloco de linhas ficará em y)
-      - align_vertical == "bottom" -> y é o fundo da caixa (última linha ficará encostada em y)
-    """
     if not text:
         return y
 
-    # 1) Quebra de linhas respeitando max_width
     all_lines = []
     lines = text.split("\n")
     for line in lines:
         if not line.strip():
-            all_lines.append("")  # mantem linhas vazias
+            all_lines.append("")
             continue
 
         if max_width and max_width > 0:
@@ -98,12 +83,9 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
                 if line_width <= max_width:
                     current_line = test_line
                 else:
-                    # se current_line vazio e a única palavra é maior que max_width,
-                    # ainda assim inserimos a palavra (não vamos cortar palavras).
                     if current_line:
                         all_lines.append(current_line)
                     else:
-                        # palavra sozinha > max_width: coloca mesmo assim
                         all_lines.append(word)
                         current_line = ""
                         continue
@@ -113,12 +95,10 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
         else:
             all_lines.append(line)
 
-    # 2) Métricas de linha
     try:
         ascent, descent = font.getmetrics()
         line_height = ascent + descent
     except Exception:
-        # fallback razoável
         try:
             line_height = int(font.size * 1.2)
         except Exception:
@@ -126,19 +106,15 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
 
     total_height = len(all_lines) * line_height
 
-    # 3) Calcula top da caixa invisível (onde começa a primeira linha)
     if align_vertical == "top":
         box_top = int(y)
     elif align_vertical == "center":
-        # queremos que o centro do bloco (box_top + total_height/2) seja y
         box_top = int(round(y - total_height / 2))
     elif align_vertical == "bottom":
-        # queremos que box_top + total_height == y
         box_top = int(round(y - total_height))
     else:
         box_top = int(y)
 
-    # 4) Desenha cada linha; posicionamento horizontal baseado em x + align.
     current_y = box_top
     for line in all_lines:
         if line == "":
@@ -148,21 +124,53 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
         bbox = draw.textbbox((0, 0), line, font=font)
         text_width = bbox[2] - bbox[0]
 
-        # Regra simples e direta: x é sempre o ponto de referência pedido
-        # - center -> centro do texto fica em x
-        # - left   -> esquerda do texto fica em x
-        # - right  -> direita do texto fica em x
         if align == "center":
             text_x = int(round(x - text_width / 2))
         elif align == "right":
             text_x = int(round(x - text_width))
-        else:  # left ou fallback
+        else:
             text_x = int(round(x))
 
         draw.text((text_x, current_y), line, font=font, fill=fill)
         current_y += line_height
 
     return current_y
+
+def draw_rectangle(layer, rect):
+    x = to_px(rect.get("x"), 0)
+    y = to_px(rect.get("y"), 0)
+    w = to_px(rect.get("width"), 0)
+    h = to_px(rect.get("height"), 0)
+    r = to_px(rect.get("border_radius"), 0)
+
+    fill_color = rect.get("color", "#000000")
+    fill_opacity = to_px(rect.get("opacity"), 100)
+    fill = color_to_rgba(fill_color, fill_opacity)
+
+    stroke_color = rect.get("stroke_color", "#000000")
+    stroke_opacity = to_px(rect.get("stroke_opacity"), 100)
+    stroke_fill = color_to_rgba(stroke_color, stroke_opacity)
+
+    sw_top = to_px(rect.get("stroke_width_top"), 0)
+    sw_bottom = to_px(rect.get("stroke_width_bottom"), 0)
+    sw_left = to_px(rect.get("stroke_width_left"), 0)
+    sw_right = to_px(rect.get("stroke_width_right"), 0)
+
+    draw = ImageDraw.Draw(layer)
+
+    if r > 0:
+        draw.rounded_rectangle([x, y, x+w, y+h], radius=r, fill=fill)
+    else:
+        draw.rectangle([x, y, x+w, y+h], fill=fill)
+
+    if sw_top > 0:
+        draw.line([(x, y), (x+w, y)], fill=stroke_fill, width=sw_top)
+    if sw_bottom > 0:
+        draw.line([(x, y+h), (x+w, y+h)], fill=stroke_fill, width=sw_bottom)
+    if sw_left > 0:
+        draw.line([(x, y), (x, y+h)], fill=stroke_fill, width=sw_left)
+    if sw_right > 0:
+        draw.line([(x+w, y), (x+w, y+h)], fill=stroke_fill, width=sw_right)
 
 @app.post("/process-text")
 def process_text():
@@ -177,6 +185,20 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
+    # --- Retângulos primeiro ---
+    retangulos = j.get("retangulos", [])
+    if not isinstance(retangulos, list):
+        return jsonify(error="Campo 'retangulos' deve ser uma lista (array de objetos)"), 400
+
+    try:
+        for r in retangulos:
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            draw_rectangle(layer, r)
+            img = Image.alpha_composite(img, layer)
+    except Exception as e:
+        return jsonify(error=f"Falha ao desenhar retângulo: {e}"), 500
+
+    # --- Depois textos ---
     textos = j.get("textos", None)
     if textos is None:
         textos = [j]
@@ -201,16 +223,12 @@ def process_text():
             opacity = to_px(t.get("opacity"), 100)
             font_name = t.get("font", "Archivo-Regular")
 
-            # Cria camada RGBA transparente para o texto
             layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(layer)
             font = load_font(fs, font_name, "font_archivo")
             fill = color_to_rgba(color, opacity)
 
-            # Desenha texto na layer respeitando a caixa invisível (x,y como referência)
             draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
-
-            # Compoe na imagem original
             img = Image.alpha_composite(img, layer)
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
@@ -231,7 +249,8 @@ def test():
         "status": "ok",
         "message": "API funcionando",
         "align_vertical_supported": True,
-        "supported_align_vertical": ["top", "center", "bottom"]
+        "supported_align_vertical": ["top", "center", "bottom"],
+        "supports_rectangles": True
     })
 
 if __name__ == "__main__":
