@@ -1,29 +1,22 @@
+import os
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
-import base64, os, traceback
+import base64, traceback
 
 app = Flask(__name__)
 
-def to_px(value, default):
-    try:
-        s = str(value).strip().lower().replace("px", "")
-        if s == "":
-            return default
-        return int(float(s))
-    except Exception:
-        return default
+def get_assets_path():
+    return Path(os.environ.get("ASSETS_DIR") or Path(__file__).resolve().parent / "assets")
 
-def decode_b64_image(data):
-    b64 = str(data)
-    if "," in b64:
-        b64 = b64.split(",", 1)[1]
-    raw = base64.b64decode(b64)
-    img = Image.open(BytesIO(raw))
-    if img.mode != "RGBA":
-        img = img.convert("RGBA")
-    return img
+def list_assets_dir(base_path):
+    files = []
+    if base_path.exists() and base_path.is_dir():
+        for f in sorted(base_path.iterdir()):
+            if f.is_file():
+                files.append(f.name)
+    return files
 
 def encode_b64_image(img, fmt="PNG"):
     buf = BytesIO()
@@ -224,7 +217,7 @@ def find_asset_file(base_path: Path, requested: str):
     return None
 
 def draw_assets(img, imagens):
-    base_path = Path(__file__).resolve().parent / "assets"
+    base_path = get_assets_path()  # corrige aqui!
     attempted = []
     resolved = []
     missing = []
@@ -376,7 +369,7 @@ def process_text():
 
 @app.get("/list-assets")
 def list_assets():
-    base_path = Path(__file__).resolve().parent / "assets"
+    base_path = get_assets_path()
     return jsonify({
         "assets_base_path": str(base_path),
         "assets_base_exists": base_path.exists(),
@@ -389,7 +382,7 @@ def health():
 
 @app.get("/test")
 def test():
-    base_path = Path(__file__).resolve().parent / "assets"
+    base_path = get_assets_path()
     return jsonify({
         "status": "ok",
         "message": "API funcionando",
