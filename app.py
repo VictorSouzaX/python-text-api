@@ -172,6 +172,32 @@ def draw_rectangle(layer, rect):
     if sw_right > 0:
         draw.line([(x+w, y), (x+w, y+h)], fill=stroke_fill, width=sw_right)
 
+def draw_assets(img, imagens):
+    """Desenha imagens da pasta assets no PDF"""
+    base_path = Path("assets")
+    for item in imagens:
+        tipo = str(item.get("tipoCredito", "")).lower()
+        x = to_px(item.get("x"), 0)
+        y = to_px(item.get("y"), 0)
+
+        if tipo == "verde":
+            file = base_path / "CREDITO_VERDE.png"
+        elif tipo == "amarelo":
+            file = base_path / "CREDITO_AMARELO.png"
+        else:
+            continue  # ignora se não for válido
+
+        if not file.exists():
+            continue
+
+        try:
+            overlay = Image.open(file).convert("RGBA")
+            img.paste(overlay, (x, y), overlay)
+        except Exception as e:
+            print(f"Erro ao inserir imagem {file}: {e}")
+
+    return img
+
 @app.post("/process-text")
 def process_text():
     j = request.get_json(silent=True) or {}
@@ -185,10 +211,10 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
-    # --- Retângulos primeiro ---
+    # --- Retângulos ---
     retangulos = j.get("retangulos", [])
     if not isinstance(retangulos, list):
-        return jsonify(error="Campo 'retangulos' deve ser uma lista (array de objetos)"), 400
+        return jsonify(error="Campo 'retangulos' deve ser uma lista"), 400
 
     try:
         for r in retangulos:
@@ -198,13 +224,13 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar retângulo: {e}"), 500
 
-    # --- Depois textos ---
+    # --- Textos ---
     textos = j.get("textos", None)
     if textos is None:
         textos = [j]
 
     if not isinstance(textos, list):
-        return jsonify(error="Campo 'textos' deve ser uma lista (array de objetos)"), 400
+        return jsonify(error="Campo 'textos' deve ser uma lista"), 400
 
     try:
         for t in textos:
@@ -233,6 +259,11 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
 
+    # --- Imagens (assets) ---
+    imagens = j.get("imagens", [])
+    if isinstance(imagens, list) and imagens:
+        img = draw_assets(img, imagens)
+
     try:
         out_b64 = encode_b64_image(img, "PNG")
         return jsonify(image_b64=out_b64, width=img.width, height=img.height)
@@ -250,7 +281,8 @@ def test():
         "message": "API funcionando",
         "align_vertical_supported": True,
         "supported_align_vertical": ["top", "center", "bottom"],
-        "supports_rectangles": True
+        "supports_rectangles": True,
+        "supports_assets": True
     })
 
 if __name__ == "__main__":
