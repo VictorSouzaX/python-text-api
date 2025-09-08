@@ -173,30 +173,65 @@ def draw_rectangle(layer, rect):
         draw.line([(x+w, y), (x+w, y+h)], fill=stroke_fill, width=sw_right)
 
 def draw_assets(img, imagens):
-    """Desenha imagens da pasta assets no PDF"""
-    base_path = Path("assets")
+    """
+    Adiciona imagens da pasta assets. Retorna (img, attempted, placed, missing)
+    - aceita 'file' (nome do arquivo) OU 'tipoCredito' (verde/amarelo)
+    - aceita 'anchor' para posicionamento relativo: topleft (default), center, topright, bottomleft, bottomright
+    """
+    base_path = Path(__file__).resolve().parent / "assets"
+    attempted = []
+    placed = []
+    missing = []
+
     for item in imagens:
-        tipo = str(item.get("tipoCredito", "")).lower()
-        x = to_px(item.get("x"), 0)
-        y = to_px(item.get("y"), 0)
-
-        if tipo == "verde":
-            file = base_path / "CREDITO_VERDE.png"
-        elif tipo == "amarelo":
-            file = base_path / "CREDITO_AMARELO.png"
+        # aceita file diretamente
+        file_candidate = None
+        if item.get("file"):
+            file_candidate = base_path / str(item.get("file"))
         else:
-            continue  # ignora se não for válido
+            tipo = str(item.get("tipoCredito", "")).lower()
+            if "verde" in tipo:
+                file_candidate = base_path / "CREDITO_VERDE.png"
+            elif "amarelo" in tipo or "amarelo" in tipo:
+                file_candidate = base_path / "CREDITO_AMARELO.png"
+            # se quiser mapear outros tipos, adicione aqui
 
-        if not file.exists():
+        if not file_candidate:
+            continue
+
+        attempted.append(str(file_candidate))
+        if not file_candidate.exists():
+            missing.append(str(file_candidate))
             continue
 
         try:
-            overlay = Image.open(file).convert("RGBA")
-            img.paste(overlay, (x, y), overlay)
-        except Exception as e:
-            print(f"Erro ao inserir imagem {file}: {e}")
+            overlay = Image.open(file_candidate).convert("RGBA")
+            x = to_px(item.get("x"), 0)
+            y = to_px(item.get("y"), 0)
+            anchor = str(item.get("anchor", "topleft")).lower()
 
-    return img
+            # ajusta posição de acordo com anchor
+            if anchor in ("center", "middle"):
+                x = int(round(x - overlay.width / 2))
+                y = int(round(y - overlay.height / 2))
+            elif anchor == "topright":
+                x = int(round(x - overlay.width))
+            elif anchor == "bottomleft":
+                y = int(round(y - overlay.height))
+            elif anchor == "bottomright":
+                x = int(round(x - overlay.width))
+                y = int(round(y - overlay.height))
+            # else 'topleft' mantém x,y
+
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            layer.paste(overlay, (x, y), overlay)
+            img = Image.alpha_composite(img, layer)
+            placed.append(str(file_candidate))
+        except Exception as e:
+            # em caso de erro, reporta mas continua
+            missing.append(str(file_candidate))
+
+    return img, attempted, placed, missing
 
 @app.post("/process-text")
 def process_text():
@@ -254,36 +289,4 @@ def process_text():
             font = load_font(fs, font_name, "font_archivo")
             fill = color_to_rgba(color, opacity)
 
-            draw_text_simple(draw, text, x, y, font, fill, align, max_width, align_vertical)
-            img = Image.alpha_composite(img, layer)
-    except Exception as e:
-        return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
-
-    # --- Imagens (assets) ---
-    imagens = j.get("imagens", [])
-    if isinstance(imagens, list) and imagens:
-        img = draw_assets(img, imagens)
-
-    try:
-        out_b64 = encode_b64_image(img, "PNG")
-        return jsonify(image_b64=out_b64, width=img.width, height=img.height)
-    except Exception as e:
-        return jsonify(error=f"Falha ao codificar imagem: {e}"), 500
-
-@app.get("/health")
-def health():
-    return "ok", 200
-
-@app.get("/test")
-def test():
-    return jsonify({
-        "status": "ok",
-        "message": "API funcionando",
-        "align_vertical_supported": True,
-        "supported_align_vertical": ["top", "center", "bottom"],
-        "supports_rectangles": True,
-        "supports_assets": True
-    })
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+            draw_text_simple(draw, t
