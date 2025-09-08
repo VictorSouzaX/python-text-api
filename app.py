@@ -3,20 +3,28 @@ from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from io import BytesIO
 from pathlib import Path
-import base64, traceback
+import base64
 
 app = Flask(__name__)
 
-def get_assets_path():
-    return Path(os.environ.get("ASSETS_DIR") or Path(__file__).resolve().parent / "assets")
+def to_px(value, default):
+    try:
+        s = str(value).strip().lower().replace("px", "")
+        if s == "":
+            return default
+        return int(float(s))
+    except Exception:
+        return default
 
-def list_assets_dir(base_path):
-    files = []
-    if base_path.exists() and base_path.is_dir():
-        for f in sorted(base_path.iterdir()):
-            if f.is_file():
-                files.append(f.name)
-    return files
+def decode_b64_image(data):
+    b64 = str(data)
+    if "," in b64:
+        b64 = b64.split(",", 1)[1]
+    raw = base64.b64decode(b64)
+    img = Image.open(BytesIO(raw))
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    return img
 
 def encode_b64_image(img, fmt="PNG"):
     buf = BytesIO()
@@ -129,166 +137,6 @@ def draw_text_simple(draw, text, x, y, font, fill, align="left", max_width=0, al
 
     return current_y
 
-def draw_rectangle(layer, rect):
-    x = to_px(rect.get("x"), 0)
-    y = to_px(rect.get("y"), 0)
-    w = to_px(rect.get("width"), 0)
-    h = to_px(rect.get("height"), 0)
-    r = to_px(rect.get("border_radius"), 0)
-
-    fill_color = rect.get("color", "#000000")
-    fill_opacity = to_px(rect.get("opacity"), 100)
-    fill = color_to_rgba(fill_color, fill_opacity)
-
-    stroke_color = rect.get("stroke_color", "#000000")
-    stroke_opacity = to_px(rect.get("stroke_opacity"), 100)
-    stroke_fill = color_to_rgba(stroke_color, stroke_opacity)
-
-    sw_top = to_px(rect.get("stroke_width_top"), 0)
-    sw_bottom = to_px(rect.get("stroke_width_bottom"), 0)
-    sw_left = to_px(rect.get("stroke_width_left"), 0)
-    sw_right = to_px(rect.get("stroke_width_right"), 0)
-
-    draw = ImageDraw.Draw(layer)
-
-    if r > 0:
-        draw.rounded_rectangle([x, y, x+w, y+h], radius=r, fill=fill)
-    else:
-        draw.rectangle([x, y, x+w, y+h], fill=fill)
-
-    if sw_top > 0:
-        draw.line([(x, y), (x+w, y)], fill=stroke_fill, width=sw_top)
-    if sw_bottom > 0:
-        draw.line([(x, y+h), (x+w, y+h)], fill=stroke_fill, width=sw_bottom)
-    if sw_left > 0:
-        draw.line([(x, y), (x, y+h)], fill=stroke_fill, width=sw_left)
-    if sw_right > 0:
-        draw.line([(x+w, y), (x+w, y+h)], fill=stroke_fill, width=sw_right)
-
-def list_assets_dir(base_path):
-    files = []
-    if base_path.exists() and base_path.is_dir():
-        for f in sorted(base_path.iterdir()):
-            if f.is_file():
-                files.append(f.name)
-    return files
-
-def find_asset_file(base_path: Path, requested: str):
-    """
-    Busca arquivo em base_path tentando:
-    - match exato (ignorando case)
-    - adicionar extensões comuns
-    - substring match (ex: 'verde' encontra 'CREDITO_VERDE.png')
-    Retorna Path ou None
-    """
-    if not base_path.exists() or not base_path.is_dir():
-        return None
-
-    # mapa: lowercase name -> Path
-    files_map = {f.name.lower(): f for f in base_path.iterdir() if f.is_file()}
-
-    req = str(requested or "").strip()
-    if not req:
-        return None
-    req_l = req.lower()
-
-    # 1) exato
-    if req_l in files_map:
-        return files_map[req_l]
-
-    # 2) tenta com extensões
-    exts = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]
-    for ext in exts:
-        if not req_l.endswith(ext):
-            cand = req_l + ext
-            if cand in files_map:
-                return files_map[cand]
-
-    # 3) substring (procura qualquer arquivo que contenha req_l)
-    for name, path in files_map.items():
-        if req_l in name:
-            return path
-
-    # 4) tenta padrão comum CREDITO_<REQ>.png
-    cand_name = f"CREDITO_{req.upper()}.png".lower()
-    if cand_name in files_map:
-        return files_map[cand_name]
-
-    return None
-
-def draw_assets(img, imagens):
-    base_path = get_assets_path()  # corrige aqui!
-    attempted = []
-    resolved = []
-    missing = []
-    available_files = list_assets_dir(base_path)
-
-    for item in imagens:
-        try:
-            # determina qual nome procurar
-            resolved_path = None
-            candidate_text = None
-
-            # 1) se passou 'file' direto
-            if item.get("file"):
-                candidate_text = Path(item.get("file")).name
-                resolved_path = find_asset_file(base_path, candidate_text)
-
-            # 2) se passou tipoCredito (mapeia para CREDITO_VERDE etc)
-            if not resolved_path and item.get("tipoCredito"):
-                candidato = f"credito_{item.get('tipoCredito')}".lower()
-                candidate_text = candidato
-                resolved_path = find_asset_file(base_path, candidate_text)
-
-            # 3) fallback: tenta o valor bruto (por exemplo 'verde')
-            if not resolved_path and item.get("tipoCredito"):
-                candidate_text = item.get("tipoCredito")
-                resolved_path = find_asset_file(base_path, candidate_text)
-
-            attempted.append(candidate_text or "(nenhum candidato)")
-
-            if not resolved_path:
-                missing.append(candidate_text or "(nenhum candidato)")
-                continue
-
-            # coloca a imagem
-            overlay = Image.open(resolved_path).convert("RGBA")
-            x = to_px(item.get("x"), 0)
-            y = to_px(item.get("y"), 0)
-            anchor = str(item.get("anchor", "topleft")).lower()
-
-            # ajusta por anchor
-            if anchor in ("center", "middle"):
-                x = int(round(x - overlay.width / 2))
-                y = int(round(y - overlay.height / 2))
-            elif anchor == "topright":
-                x = int(round(x - overlay.width))
-            elif anchor == "bottomleft":
-                y = int(round(y - overlay.height))
-            elif anchor == "bottomright":
-                x = int(round(x - overlay.width))
-                y = int(round(y - overlay.height))
-
-            layer = Image.new("RGBA", img.size, (0,0,0,0))
-            layer.paste(overlay, (x, y), overlay)
-            img = Image.alpha_composite(img, layer)
-            resolved.append(str(resolved_path))
-        except Exception as e:
-            missing.append(str(item.get("file") or item.get("tipoCredito") or "(erro)"))
-            # não interromper o loop
-            print("Erro ao inserir asset:", e)
-            traceback.print_exc()
-
-    debug = {
-        "assets_base_path": str(base_path),
-        "assets_base_exists": base_path.exists(),
-        "assets_list": available_files,
-        "attempted_candidates": attempted,
-        "resolved_paths": resolved,
-        "missing": missing
-    }
-    return img, debug
-
 @app.post("/process-text")
 def process_text():
     j = request.get_json(silent=True) or {}
@@ -302,20 +150,6 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao decodificar imagem: {e}"), 400
 
-    # --- Retângulos ---
-    retangulos = j.get("retangulos", [])
-    if not isinstance(retangulos, list):
-        return jsonify(error="Campo 'retangulos' deve ser uma lista"), 400
-
-    try:
-        for r in retangulos:
-            layer = Image.new("RGBA", img.size, (0,0,0,0))
-            draw_rectangle(layer, r)
-            img = Image.alpha_composite(img, layer)
-    except Exception as e:
-        return jsonify(error=f"Falha ao desenhar retângulo: {e}"), 500
-
-    # --- Textos ---
     textos = j.get("textos", None)
     if textos is None:
         textos = [j]
@@ -350,46 +184,16 @@ def process_text():
     except Exception as e:
         return jsonify(error=f"Falha ao desenhar texto: {e}"), 500
 
-    # --- Imagens (assets) ---
-    imagens = j.get("imagens", [])
-    assets_debug = {}
-    if isinstance(imagens, list) and imagens:
-        try:
-            img, debug = draw_assets(img, imagens)
-            assets_debug = debug
-        except Exception as e:
-            assets_debug = {"error": str(e)}
-
     try:
         out_b64 = encode_b64_image(img, "PNG")
-        resp = {"image_b64": out_b64, "width": img.width, "height": img.height, "assets": assets_debug}
+        resp = {"image_b64": out_b64, "width": img.width, "height": img.height}
         return jsonify(resp)
     except Exception as e:
         return jsonify(error=f"Falha ao codificar imagem: {e}"), 500
 
-@app.get("/list-assets")
-def list_assets():
-    base_path = get_assets_path()
-    return jsonify({
-        "assets_base_path": str(base_path),
-        "assets_base_exists": base_path.exists(),
-        "assets_list": list_assets_dir(base_path)
-    })
-
 @app.get("/health")
 def health():
     return "ok", 200
-
-@app.get("/test")
-def test():
-    base_path = get_assets_path()
-    return jsonify({
-        "status": "ok",
-        "message": "API funcionando",
-        "assets_base_path": str(base_path),
-        "assets_base_exists": base_path.exists(),
-        "assets_list_sample": list_assets_dir(base_path)[:50]
-    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
